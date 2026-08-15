@@ -1,0 +1,23 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Real records and any PII output: never commit
+local_records/
+*.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

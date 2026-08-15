@@ -1,0 +1,14 @@
+# Core
+streamlit>=1.40
+anthropic>=0.40
+
+# Schema and config
+jsonschema>=4.23
+python-dotenv>=1.0
+
+# Image and document handling
+pillow>=10.4
+pymupdf>=1.24        # render PDF pages to images for vision extraction
+
+# Tests
+pytest>=8.3
