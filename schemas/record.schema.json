@@ -1,3 +1,160 @@
 {
-  "$comment": "Placeholder. The real JSON Schema is written in Step 2, per PROJECT_SPEC.md section 8."
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://medical-records-tracker/schemas/record.schema.json",
+  "title": "Medical Record",
+  "description": "One digitised medical document (prescription, lab report, discharge summary, or other) extracted into a structured, consistent shape. See PROJECT_SPEC.md section 8. Unreadable fields are null, never guessed and never the string 'N/A'. Dates are normalised to YYYY-MM-DD.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_id",
+    "episode_id",
+    "source_filename",
+    "date_processed",
+    "document_type",
+    "record_date",
+    "provider",
+    "patient",
+    "diagnosis",
+    "medications",
+    "investigations",
+    "advice_verbatim",
+    "follow_up",
+    "confidence",
+    "flags",
+    "needs_review"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable unique id for this record."
+    },
+    "episode_id": {
+      "type": ["string", "null"],
+      "description": "Links documents from the same visit or condition into one episode. Null until clustered."
+    },
+    "source_filename": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Filename of the original uploaded document, which is retained locally as the source of truth."
+    },
+    "date_processed": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Date this record was processed, YYYY-MM-DD."
+    },
+    "document_type": {
+      "type": "string",
+      "enum": ["prescription", "lab_report", "discharge_summary", "other"],
+      "description": "Classified by the model."
+    },
+    "record_date": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Date on the document itself, YYYY-MM-DD. Null if not readable; never guessed."
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "specialty", "clinic"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "specialty": { "type": ["string", "null"] },
+        "clinic": { "type": ["string", "null"] }
+      }
+    },
+    "patient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "age", "sex"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "age": { "type": ["number", "null"], "minimum": 0 },
+        "sex": { "type": ["string", "null"] }
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stated_text", "plain_language"],
+      "properties": {
+        "stated_text": {
+          "type": ["string", "null"],
+          "description": "The diagnosis exactly as written on the document. Null if none is stated."
+        },
+        "plain_language": {
+          "type": ["string", "null"],
+          "description": "Plain-language reading of what is written. General facts about a named condition are allowed; claims about this patient (severity, cause, prognosis, what to do) are not."
+        }
+      }
+    },
+    "medications": {
+      "type": "array",
+      "description": "One entry per medication. Empty array if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "strength", "form", "dose", "frequency", "duration", "purpose_plain"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "strength": { "type": ["string", "null"] },
+          "form": { "type": ["string", "null"] },
+          "dose": { "type": ["string", "null"] },
+          "frequency": { "type": ["string", "null"] },
+          "duration": { "type": ["string", "null"] },
+          "purpose_plain": {
+            "type": ["string", "null"],
+            "description": "Plain-language purpose. General facts about a named drug are allowed; claims about this patient are not."
+          }
+        }
+      }
+    },
+    "investigations": {
+      "type": "array",
+      "description": "One entry per test or measurement. Empty array if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value", "unit", "reference_range", "flag", "plain_note"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "value": { "type": ["string", "null"] },
+          "unit": { "type": ["string", "null"] },
+          "reference_range": { "type": ["string", "null"] },
+          "flag": {
+            "type": "string",
+            "enum": ["normal", "high", "low", "unknown"],
+            "description": "Carried only when a flag is printed on the source report. Never computed from value and reference range. Use 'unknown' when no flag is printed."
+          },
+          "plain_note": {
+            "type": ["string", "null"],
+            "description": "Plain-language reading of what is written. No assessment of what the value means for this patient."
+          }
+        }
+      }
+    },
+    "advice_verbatim": {
+      "type": ["string", "null"],
+      "description": "Advice or instructions exactly as written on the document. Not paraphrased or extended."
+    },
+    "follow_up": {
+      "type": ["string", "null"],
+      "description": "Follow-up instruction as written. Null if none."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Model's self-reported confidence in the extraction."
+    },
+    "flags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Machine-readable reasons this record may need review (for example, 'low_confidence', 'unreadable_dose')."
+    },
+    "needs_review": {
+      "type": "string",
+      "enum": ["Y", "N"],
+      "description": "Set deterministically by validate.py from real signals, not by the model."
+    }
+  }
 }
