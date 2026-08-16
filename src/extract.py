@@ -7,9 +7,10 @@ Three groups of fields are deliberately not the model's to write:
     under the fidelity guard.
   - Code-owned fields (record_id, source_filename, date_processed, episode_id,
     needs_review) are set by code here or downstream, never by the model.
-So the model-facing schema is derived from record.schema.json by removing those
-fields, plus the JSON Schema keywords structured outputs cannot enforce. The full
-record is validated against record.schema.json by validate.py (Step 5).
+So the model-facing schema is record.schema.json minus those fields. The model
+returns JSON guided by that schema; this module validates the result against it
+with jsonschema (the deterministic gatekeeper) and repairs once on failure. The
+full assembled record is validated again by validate.py (Step 5).
 
 Lab flags are carried only if printed on the source, never computed.
 
@@ -24,6 +25,8 @@ import json
 import os
 import uuid
 
+from jsonschema import Draft202012Validator
+
 from src import model
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,9 +40,6 @@ _PLAIN_FIELDS = {
     "medications": ("purpose_plain",),
     "investigations": ("plain_note",),
 }
-# JSON Schema keywords structured outputs does not support (stripped for the call).
-_UNSUPPORTED = {"pattern", "minLength", "maxLength", "minimum", "maximum", "multipleOf", "format"}
-_META = {"$schema", "$id", "$comment"}
 
 _MEDIA_TYPES = {
     ".png": "image/png",
@@ -70,15 +70,6 @@ def load_schema() -> dict:
         return json.load(f)
 
 
-def _strip_unsupported(node):
-    """Recursively drop keywords structured outputs cannot enforce."""
-    if isinstance(node, dict):
-        return {k: _strip_unsupported(v) for k, v in node.items() if k not in _UNSUPPORTED and k not in _META}
-    if isinstance(node, list):
-        return [_strip_unsupported(v) for v in node]
-    return node
-
-
 def _drop_fields(obj: dict, fields) -> None:
     """Remove `fields` from an object schema's properties and required list."""
     for f in fields:
@@ -86,15 +77,25 @@ def _drop_fields(obj: dict, fields) -> None:
     obj["required"] = [r for r in obj["required"] if r not in fields]
 
 
-def build_extraction_schema(full: dict | None = None) -> dict:
-    """Derive the model-facing schema: the full record minus code-owned and
-    plain-language fields, minus keywords structured outputs cannot enforce."""
+def extraction_schema(full: dict | None = None) -> dict:
+    """The model-facing schema: the full record minus code-owned and
+    plain-language fields. Constraints (date pattern, enums) are kept so the
+    validator enforces them."""
     schema = copy.deepcopy(full or load_schema())
     _drop_fields(schema, _CODE_OWNED)
     _drop_fields(schema["properties"]["diagnosis"], _PLAIN_FIELDS["diagnosis"])
     _drop_fields(schema["properties"]["medications"]["items"], _PLAIN_FIELDS["medications"])
     _drop_fields(schema["properties"]["investigations"]["items"], _PLAIN_FIELDS["investigations"])
-    return _strip_unsupported(schema)
+    return schema
+
+
+def _base_user_prompt(schema: dict) -> str:
+    return (
+        EXTRACTION_USER
+        + "\n\nReturn a single JSON object that matches this schema exactly. "
+        "Output only the JSON, with no markdown fences and no commentary.\n\n"
+        + json.dumps(schema, indent=2)
+    )
 
 
 def media_type_for(path: str) -> str:
@@ -129,24 +130,39 @@ def assemble_record(extracted: dict, source_filename: str) -> dict:
     return record
 
 
-def extract_record(image_path: str, tier: str = "fast") -> dict:
+def extract_record(image_path: str, tier: str = "fast", max_repairs: int = 1) -> dict:
     """Extract one document into a full record dict conforming to
     record.schema.json. Plain-language fields are null; needs_review is a
     placeholder that validate.py later sets authoritatively.
 
-    Pass tier="judgment" to read a hard or low-confidence document with the
-    stronger vision model.
+    The model's JSON is validated against the model-facing schema and repaired
+    once on failure. Pass tier="judgment" to read a hard or low-confidence
+    document with the stronger vision model.
     """
     media_type = media_type_for(image_path)
     with open(image_path, "rb") as f:
         data = f.read()
 
-    extracted = model.extract_json(
-        data=data,
-        media_type=media_type,
-        system=EXTRACTION_SYSTEM,
-        user=EXTRACTION_USER,
-        schema=build_extraction_schema(),
-        tier=tier,
-    )
+    schema = extraction_schema()
+    validator = Draft202012Validator(schema)
+    base_user = _base_user_prompt(schema)
+    user = base_user
+
+    errors = []
+    for attempt in range(max_repairs + 1):
+        extracted = model.extract_json(
+            data=data, media_type=media_type,
+            system=EXTRACTION_SYSTEM, user=user, tier=tier,
+        )
+        errors = sorted(validator.iter_errors(extracted), key=str)
+        if not errors:
+            break
+        reasons = "; ".join(e.message for e in errors[:8])
+        user = base_user + f"\n\nYour previous output failed validation: {reasons}. Return corrected JSON only."
+
+    if errors:
+        raise model.ModelError(
+            "extraction did not satisfy the schema after repair: "
+            + "; ".join(e.message for e in errors[:8])
+        )
     return assemble_record(extracted, source_filename=os.path.basename(image_path))

@@ -63,19 +63,43 @@ def _source_block(data: bytes, media_type: str) -> dict:
     raise ModelError(f"unsupported media type: {media_type!r}")
 
 
+def _loads_json(text: str) -> dict:
+    """Parse a JSON object from model text, tolerating code fences or stray prose."""
+    s = text.strip()
+    if s.startswith("```"):
+        s = s[3:]
+        if s[:4].lower() == "json":
+            s = s[4:]
+        if s.endswith("```"):
+            s = s[:-3]
+        s = s.strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # Last resort: slice out the outermost braces.
+        i, j = s.find("{"), s.rfind("}")
+        if i != -1 and j > i:
+            try:
+                return json.loads(s[i:j + 1])
+            except json.JSONDecodeError as e:
+                raise ModelError(f"model returned invalid JSON: {e}") from e
+        raise ModelError("model returned no JSON object")
+
+
 def extract_json(
     *,
     data: bytes,
     media_type: str,
     system: str,
     user: str,
-    schema: dict,
     tier: str = "fast",
-    max_tokens: int = 8192,
+    max_tokens: int = 12000,
 ) -> dict:
-    """Send a document image or PDF plus instructions and return schema-shaped JSON.
+    """Send a document image or PDF plus instructions and return the parsed JSON.
 
-    Uses structured outputs so the response conforms to `schema` by construction.
+    The `user` prompt is expected to carry the required JSON shape; the caller
+    validates the result against the schema (structured outputs cannot be used
+    here because the record has more nullable fields than that feature allows).
     Raises ModelError on transport failure, refusal, truncation, or bad JSON.
     """
     client = _client()
@@ -86,7 +110,6 @@ def extract_json(
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": content}],
-            output_config={"format": {"type": "json_schema", "schema": schema}},
         )
     except Exception as e:  # boundary: wrap SDK/transport errors for the caller
         raise ModelError(f"model request failed: {e}") from e
@@ -99,7 +122,4 @@ def extract_json(
     text = next((b.text for b in response.content if b.type == "text"), None)
     if text is None:
         raise ModelError("model returned no text block to parse")
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ModelError(f"model returned invalid JSON: {e}") from e
+    return _loads_json(text)
