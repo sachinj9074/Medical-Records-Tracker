@@ -1,0 +1,43 @@
+{
+  "sample_id": "sample_01_pharyngitis",
+  "image": "samples/sample_01_pharyngitis.png",
+  "document_type": "prescription",
+  "expected": {
+    "record_date": "2026-02-10",
+    "provider": {
+      "name": "Dr. Anil Rao",
+      "specialty": "General Medicine",
+      "clinic": "Sunrise Family Clinic"
+    },
+    "patient": {
+      "name": "Rahul Mehta",
+      "age": 32,
+      "sex": "M"
+    },
+    "diagnosis_stated_text": "Acute pharyngitis",
+    "medications": [
+      {
+        "name": "Amoxicillin",
+        "strength": "500 mg",
+        "form": "tablet",
+        "dose": "1 tablet",
+        "frequency": "twice daily",
+        "duration": "5 days"
+      },
+      {
+        "name": "Paracetamol",
+        "strength": "650 mg",
+        "form": "tablet",
+        "dose": "1 tablet",
+        "frequency": "three times a day",
+        "duration": "3 days"
+      }
+    ],
+    "investigations": [],
+    "advice_verbatim": "Warm saline gargles. Rest and plenty of fluids.",
+    "follow_up": "Review after 5 days if not improving."
+  },
+  "expected_confidence": "high",
+  "expected_needs_review": "N",
+  "scoring_notes": "Clean typed baseline. All fields should extract cleanly."
+}

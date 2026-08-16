@@ -1,0 +1,51 @@
+{
+  "sample_id": "sample_02_toothpain",
+  "image": "samples/sample_02_toothpain.png",
+  "document_type": "prescription",
+  "expected": {
+    "record_date": "2026-03-05",
+    "provider": {
+      "name": "Dr. S. Kapoor",
+      "specialty": "Dentistry",
+      "clinic": "City Dental Care"
+    },
+    "patient": {
+      "name": "Rahul Mehta",
+      "age": 32,
+      "sex": "M"
+    },
+    "diagnosis_stated_text": "Irreversible pulpitis (tooth 46)",
+    "medications": [
+      {
+        "name": "Augmentin",
+        "strength": "625 mg",
+        "form": "tablet",
+        "dose": "1 tablet",
+        "frequency": "twice daily",
+        "duration": "5 days"
+      },
+      {
+        "name": "Brufen",
+        "strength": "400 mg",
+        "form": "tablet",
+        "dose": "1 tablet",
+        "frequency": "three times a day",
+        "duration": "3 days"
+      },
+      {
+        "name": "Pan",
+        "strength": "40 mg",
+        "form": "capsule",
+        "dose": "1 capsule",
+        "frequency": "once daily before food",
+        "duration": null
+      }
+    ],
+    "investigations": [],
+    "advice_verbatim": "Soft diet, avoid cold.",
+    "follow_up": "Root canal treatment advised. Review after 3 days."
+  },
+  "expected_confidence": "low",
+  "expected_needs_review": "Y",
+  "scoring_notes": "Handwritten and terse. Expect low confidence and a needs_review flag. Brand names as written (Augmentin, Brufen, Pan)."
+}

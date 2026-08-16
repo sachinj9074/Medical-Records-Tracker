@@ -1,0 +1,55 @@
+{
+  "sample_id": "sample_03_diabetes_lab",
+  "image": "samples/sample_03_diabetes_lab.png",
+  "document_type": "lab_report",
+  "expected": {
+    "record_date": "2026-01-15",
+    "provider": {
+      "name": null,
+      "specialty": null,
+      "clinic": "MedLab Diagnostics"
+    },
+    "patient": {
+      "name": "Rahul Mehta",
+      "age": 32,
+      "sex": "M"
+    },
+    "diagnosis_stated_text": null,
+    "medications": [],
+    "investigations": [
+      {
+        "name": "HbA1c",
+        "value": "7.8",
+        "unit": "%",
+        "reference_range": "< 5.7",
+        "flag": "high"
+      },
+      {
+        "name": "Fasting Plasma Glucose",
+        "value": "142",
+        "unit": "mg/dL",
+        "reference_range": "70 - 100",
+        "flag": "high"
+      },
+      {
+        "name": "Total Cholesterol",
+        "value": "185",
+        "unit": "mg/dL",
+        "reference_range": "< 200",
+        "flag": "unknown"
+      },
+      {
+        "name": "Serum Creatinine",
+        "value": "0.9",
+        "unit": "mg/dL",
+        "reference_range": "0.7 - 1.3",
+        "flag": "unknown"
+      }
+    ],
+    "advice_verbatim": null,
+    "follow_up": null
+  },
+  "expected_confidence": "high",
+  "expected_needs_review": "N",
+  "scoring_notes": "Tests the printed-only flag rule. HbA1c and FPG carry a printed 'H' (flag=high). Cholesterol and Creatinine have NO printed flag, so flag MUST be 'unknown', never computed to 'normal'."
+}

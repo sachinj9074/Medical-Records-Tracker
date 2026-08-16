@@ -1,0 +1,43 @@
+{
+  "sample_id": "sample_04_eye_rash",
+  "image": "samples/sample_04_eye_rash.png",
+  "document_type": "prescription",
+  "expected": {
+    "record_date": "2026-04-02",
+    "provider": {
+      "name": "Dr. Neha Verma",
+      "specialty": "Dermatology",
+      "clinic": "Skin & Care Dermatology"
+    },
+    "patient": {
+      "name": "Rahul Mehta",
+      "age": 32,
+      "sex": "M"
+    },
+    "diagnosis_stated_text": "Allergic contact dermatitis, left upper eyelid",
+    "medications": [
+      {
+        "name": "Mometasone Furoate 0.1%",
+        "strength": "Ointment",
+        "form": "ointment",
+        "dose": "apply thin layer",
+        "frequency": "once daily",
+        "duration": "7 days"
+      },
+      {
+        "name": "Levocetirizine",
+        "strength": "5 mg",
+        "form": "tablet",
+        "dose": "1 tablet",
+        "frequency": "at night",
+        "duration": "7 days"
+      }
+    ],
+    "investigations": [],
+    "advice_verbatim": "Avoid rubbing the area. Avoid new cosmetics or soaps near the eye.",
+    "follow_up": "Review after 1 week."
+  },
+  "expected_confidence": "high",
+  "expected_needs_review": "N",
+  "scoring_notes": "Topical ointment plus an oral antihistamine. Tests a non-tablet form and a periorbital site."
+}
