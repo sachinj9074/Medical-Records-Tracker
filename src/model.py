@@ -22,7 +22,7 @@ except ImportError:  # dotenv is optional; env vars may be set another way
     pass
 
 FAST_MODEL = os.getenv("FAST_MODEL", "claude-sonnet-5")
-JUDGMENT_MODEL = os.getenv("JUDGMENT_MODEL", "claude-opus-5")
+JUDGMENT_MODEL = os.getenv("JUDGMENT_MODEL", "claude-opus-4-8")
 
 _TIERS = {"fast": FAST_MODEL, "judgment": JUDGMENT_MODEL}
 
