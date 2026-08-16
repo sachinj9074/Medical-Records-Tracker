@@ -56,7 +56,9 @@ Rules:
 - Extract only what is on the page. If a field is unreadable or absent, use null. Never guess, and never write "N/A".
 - Normalise every date to YYYY-MM-DD. If a date is unreadable, use null.
 - Classify the document type.
-- Do not assess or interpret. Do not write plain-language notes, opinions, severity, or advice; those fields are not part of your output.
+- Write out standard dosing shorthand into normal words in the dose, frequency, and duration fields. For example: "1-0-1" or "BD" means one unit twice daily (dose "1 tablet", frequency "twice daily"); "1-1-1" or "TDS" means three times a day; "OD" means once daily; "x5d" means "5 days"; "b/f" means "before food". In X-Y-Z notation each number is the units taken morning, afternoon, and night. This is de-abbreviating standard notation, not interpreting, and it does not change what was prescribed.
+- Do not assess or interpret beyond that. Do not add severity, cause, prognosis, plain-language notes, opinions, or advice; those are not part of your output. Keep diagnosis.stated_text and advice_verbatim exactly as written on the page.
+- provider.specialty is a medical specialty (for example Cardiology, Dermatology) only if one is stated. Do not put qualifications or degrees such as MBBS, BDS, or MDS there; if no specialty is stated, use null.
 - Lab flags: set an investigation's flag only if a flag (for example H or L) is printed on the report. Never compute it from the value and reference range. If no flag is printed, use "unknown".
 - Report your confidence in the extraction as high, medium, or low, based on how legible the document is.
 - In flags, list short machine-readable reasons the record may need review, for example "handwritten", "low_confidence", or "unreadable_dose". Use an empty list if there are none.

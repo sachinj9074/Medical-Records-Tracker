@@ -18,7 +18,7 @@
     "medications": [
       {
         "name": "Mometasone Furoate 0.1%",
-        "strength": "Ointment",
+        "strength": null,
         "form": "ointment",
         "dose": "apply thin layer",
         "frequency": "once daily",

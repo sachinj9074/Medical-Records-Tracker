@@ -69,7 +69,8 @@ def render_typed_rx(d):
     dr.text((60, y), f'Diagnosis: {d["diagnosis"]}', font=font(ARIALBD, 22), fill="black"); y += 50
     dr.text((60, y), "Rx", font=font(ARIALBD, 40), fill="black"); y += 58
     for i, m in enumerate(d["meds"], 1):
-        head = f'{i}.  {m["form_prefix"]}{m["name"]} {m["strength"]}'.strip()
+        body = m.get("display") or f'{m["form_prefix"]}{m["name"]} {m.get("strength") or ""}'.strip()
+        head = f'{i}.  {body}'
         sig = f'{m["dose"]} {m["frequency"]} x {m["duration"]}'
         dr.text((90, y), head, font=font(ARIAL, 24), fill="black"); y += 32
         dr.text((120, y), sig, font=font(ARIAL, 20), fill=(60, 60, 60)); y += 42
@@ -183,7 +184,7 @@ DOCS = [
         "clinic": "City Dental Care",
         "provider_name": "Dr. S. Kapoor",
         "provider_qual": "BDS, MDS",
-        "provider_specialty": "Dentistry",
+        "provider_specialty": None,
         "date_display": "5/3/26",
         "record_date": "2026-03-05",
         "patient_name": "Rahul Mehta",
@@ -253,7 +254,8 @@ DOCS = [
         "patient_sex": "M",
         "diagnosis": "Allergic contact dermatitis, left upper eyelid",
         "meds": [
-            {"form_prefix": "", "name": "Mometasone Furoate 0.1%", "strength": "Ointment", "form": "ointment",
+            {"form_prefix": "", "display": "Mometasone Furoate 0.1% Ointment",
+             "name": "Mometasone Furoate 0.1%", "strength": None, "form": "ointment",
              "dose": "apply thin layer", "frequency": "once daily", "duration": "7 days"},
             {"form_prefix": "Tab. ", "name": "Levocetirizine", "strength": "5 mg", "form": "tablet",
              "dose": "1 tablet", "frequency": "at night", "duration": "7 days"},
@@ -290,7 +292,7 @@ def build_label(d):
                 "clinic": d["clinic"],
             },
             "patient": {"name": d["patient_name"], "age": d["patient_age"], "sex": d["patient_sex"]},
-            "diagnosis_stated_text": d.get("diagnosis"),
+            "diagnosis_stated_text": d.get("dx_written") or d.get("diagnosis"),
             "medications": meds,
             "investigations": invs,
             "advice_verbatim": d.get("advice"),

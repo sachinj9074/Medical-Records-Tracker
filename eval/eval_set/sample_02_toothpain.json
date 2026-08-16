@@ -6,7 +6,7 @@
     "record_date": "2026-03-05",
     "provider": {
       "name": "Dr. S. Kapoor",
-      "specialty": "Dentistry",
+      "specialty": null,
       "clinic": "City Dental Care"
     },
     "patient": {
@@ -14,7 +14,7 @@
       "age": 32,
       "sex": "M"
     },
-    "diagnosis_stated_text": "Irreversible pulpitis (tooth 46)",
+    "diagnosis_stated_text": "Irrev. pulpitis 46",
     "medications": [
       {
         "name": "Augmentin",
