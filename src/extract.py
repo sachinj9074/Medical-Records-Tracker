@@ -1,11 +1,152 @@
 """Vision extraction: a messy or handwritten document image -> structured record.
 
-Uses a vision model to read fields into the schema in
-schemas/record.schema.json, classify the document type, and self-report
-confidence. Unreadable fields are returned as null, never guessed. Lab flags are
-carried only if printed on the source, never computed.
+Fills only the factual fields of record.schema.json from what is on the page.
+Three groups of fields are deliberately not the model's to write:
+  - Plain-language fields (diagnosis.plain_language, medications[].purpose_plain,
+    investigations[].plain_note) stay null here; explain.py authors them later
+    under the fidelity guard.
+  - Code-owned fields (record_id, source_filename, date_processed, episode_id,
+    needs_review) are set by code here or downstream, never by the model.
+So the model-facing schema is derived from record.schema.json by removing those
+fields, plus the JSON Schema keywords structured outputs cannot enforce. The full
+record is validated against record.schema.json by validate.py (Step 5).
+
+Lab flags are carried only if printed on the source, never computed.
 
 See PROJECT_SPEC.md sections 6 and 8.
-
-TODO (Step 4): implement extraction against the schema.
 """
+
+from __future__ import annotations
+
+import copy
+import datetime
+import json
+import os
+import uuid
+
+from src import model
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCHEMA_PATH = os.path.join(_ROOT, "schemas", "record.schema.json")
+
+# Top-level fields set by code, not the model.
+_CODE_OWNED = ("record_id", "episode_id", "source_filename", "date_processed", "needs_review")
+# Plain-language fields authored by explain.py, not extraction.
+_PLAIN_FIELDS = {
+    "diagnosis": ("plain_language",),
+    "medications": ("purpose_plain",),
+    "investigations": ("plain_note",),
+}
+# JSON Schema keywords structured outputs does not support (stripped for the call).
+_UNSUPPORTED = {"pattern", "minLength", "maxLength", "minimum", "maximum", "multipleOf", "format"}
+_META = {"$schema", "$id", "$comment"}
+
+_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+}
+
+EXTRACTION_SYSTEM = """You read a single medical document (prescription, lab report, discharge summary, or other) and extract what is written into a structured record.
+
+Rules:
+- Extract only what is on the page. If a field is unreadable or absent, use null. Never guess, and never write "N/A".
+- Normalise every date to YYYY-MM-DD. If a date is unreadable, use null.
+- Classify the document type.
+- Do not assess or interpret. Do not write plain-language notes, opinions, severity, or advice; those fields are not part of your output.
+- Lab flags: set an investigation's flag only if a flag (for example H or L) is printed on the report. Never compute it from the value and reference range. If no flag is printed, use "unknown".
+- Report your confidence in the extraction as high, medium, or low, based on how legible the document is.
+- In flags, list short machine-readable reasons the record may need review, for example "handwritten", "low_confidence", or "unreadable_dose". Use an empty list if there are none.
+"""
+
+EXTRACTION_USER = "Extract this document into the structured record."
+
+
+def load_schema() -> dict:
+    with open(SCHEMA_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _strip_unsupported(node):
+    """Recursively drop keywords structured outputs cannot enforce."""
+    if isinstance(node, dict):
+        return {k: _strip_unsupported(v) for k, v in node.items() if k not in _UNSUPPORTED and k not in _META}
+    if isinstance(node, list):
+        return [_strip_unsupported(v) for v in node]
+    return node
+
+
+def _drop_fields(obj: dict, fields) -> None:
+    """Remove `fields` from an object schema's properties and required list."""
+    for f in fields:
+        obj["properties"].pop(f, None)
+    obj["required"] = [r for r in obj["required"] if r not in fields]
+
+
+def build_extraction_schema(full: dict | None = None) -> dict:
+    """Derive the model-facing schema: the full record minus code-owned and
+    plain-language fields, minus keywords structured outputs cannot enforce."""
+    schema = copy.deepcopy(full or load_schema())
+    _drop_fields(schema, _CODE_OWNED)
+    _drop_fields(schema["properties"]["diagnosis"], _PLAIN_FIELDS["diagnosis"])
+    _drop_fields(schema["properties"]["medications"]["items"], _PLAIN_FIELDS["medications"])
+    _drop_fields(schema["properties"]["investigations"]["items"], _PLAIN_FIELDS["investigations"])
+    return _strip_unsupported(schema)
+
+
+def media_type_for(path: str) -> str:
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        return _MEDIA_TYPES[ext]
+    except KeyError:
+        raise ValueError(f"unsupported file type: {ext!r}")
+
+
+def new_record_id() -> str:
+    return "rec_" + uuid.uuid4().hex[:12]
+
+
+def assemble_record(extracted: dict, source_filename: str) -> dict:
+    """Merge model-extracted facts with code-owned fields and null
+    plain-language placeholders into a full record."""
+    record = dict(extracted)
+    record["record_id"] = new_record_id()
+    record["episode_id"] = None
+    record["source_filename"] = source_filename
+    record["date_processed"] = datetime.date.today().isoformat()
+    record["needs_review"] = "N"  # placeholder; validate.py sets this deterministically
+
+    # Restore the null plain-language fields for the explain step to fill.
+    if isinstance(record.get("diagnosis"), dict):
+        record["diagnosis"].setdefault("plain_language", None)
+    for med in record.get("medications", []):
+        med.setdefault("purpose_plain", None)
+    for inv in record.get("investigations", []):
+        inv.setdefault("plain_note", None)
+    return record
+
+
+def extract_record(image_path: str, tier: str = "fast") -> dict:
+    """Extract one document into a full record dict conforming to
+    record.schema.json. Plain-language fields are null; needs_review is a
+    placeholder that validate.py later sets authoritatively.
+
+    Pass tier="judgment" to read a hard or low-confidence document with the
+    stronger vision model.
+    """
+    media_type = media_type_for(image_path)
+    with open(image_path, "rb") as f:
+        data = f.read()
+
+    extracted = model.extract_json(
+        data=data,
+        media_type=media_type,
+        system=EXTRACTION_SYSTEM,
+        user=EXTRACTION_USER,
+        schema=build_extraction_schema(),
+        tier=tier,
+    )
+    return assemble_record(extracted, source_filename=os.path.basename(image_path))
