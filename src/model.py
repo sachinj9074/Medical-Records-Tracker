@@ -86,6 +86,18 @@ def _loads_json(text: str) -> dict:
         raise ModelError("model returned no JSON object")
 
 
+def _parse_response(response) -> dict:
+    """Check an Anthropic response for refusal or truncation, then parse its JSON text."""
+    if response.stop_reason == "refusal":
+        raise ModelError("model declined the request (stop_reason=refusal)")
+    if response.stop_reason == "max_tokens":
+        raise ModelError("model output was truncated (stop_reason=max_tokens); raise max_tokens")
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if text is None:
+        raise ModelError("model returned no text block to parse")
+    return _loads_json(text)
+
+
 def extract_json(
     *,
     data: bytes,
@@ -114,12 +126,31 @@ def extract_json(
     except Exception as e:  # boundary: wrap SDK/transport errors for the caller
         raise ModelError(f"model request failed: {e}") from e
 
-    if response.stop_reason == "refusal":
-        raise ModelError("model declined the request (stop_reason=refusal)")
-    if response.stop_reason == "max_tokens":
-        raise ModelError("model output was truncated (stop_reason=max_tokens); raise max_tokens")
+    return _parse_response(response)
 
-    text = next((b.text for b in response.content if b.type == "text"), None)
-    if text is None:
-        raise ModelError("model returned no text block to parse")
-    return _loads_json(text)
+
+def complete_json(
+    *,
+    system: str,
+    user: str,
+    tier: str = "judgment",
+    max_tokens: int = 4000,
+) -> dict:
+    """Text-only structured call: no document attached, JSON expected in the reply.
+
+    Used by explain.py, which works from the already-extracted record rather than
+    from the image. The `user` prompt carries the required JSON shape; the caller
+    validates the result. Raises ModelError on failure, refusal, truncation, or
+    bad JSON.
+    """
+    client = _client()
+    try:
+        response = client.messages.create(
+            model=model_for(tier),
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": [{"type": "text", "text": user}]}],
+        )
+    except Exception as e:  # boundary: wrap SDK/transport errors for the caller
+        raise ModelError(f"model request failed: {e}") from e
+    return _parse_response(response)

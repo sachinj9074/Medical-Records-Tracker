@@ -113,6 +113,10 @@ def review_reasons(record: dict) -> list[str]:
     if conf == "medium" and _has_legibility_flag(flags):
         reasons.append("medium_confidence_hard_read")
 
+    # explain.py withheld a plain-language field that failed its fidelity guard.
+    if any(isinstance(f, str) and f.startswith("explanation_withheld") for f in flags):
+        reasons.append("explanation_withheld")
+
     return reasons
 
 

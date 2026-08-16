@@ -105,6 +105,14 @@ def test_medium_confidence_with_legibility_flag_flags():
     assert "medium_confidence_hard_read" in validate.evaluate(r).reasons
 
 
+def test_explanation_withheld_flag_triggers_review():
+    r = base_record()
+    r["flags"] = ["explanation_withheld:medications[0]"]
+    res = validate.evaluate(r)
+    assert res.needs_review == "Y"
+    assert "explanation_withheld" in res.reasons
+
+
 # --- noise control: weak signals must stay quiet ---------------------------
 
 def test_medium_confidence_alone_is_quiet():
