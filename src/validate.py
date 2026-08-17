@@ -116,6 +116,9 @@ def review_reasons(record: dict) -> list[str]:
     # explain.py withheld a plain-language field that failed its fidelity guard.
     if any(isinstance(f, str) and f.startswith("explanation_withheld") for f in flags):
         reasons.append("explanation_withheld")
+    # ingest.py could not author explanations at all (model failure).
+    if "explanation_failed" in flags:
+        reasons.append("explanation_failed")
 
     return reasons
 
