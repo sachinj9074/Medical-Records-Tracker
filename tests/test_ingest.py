@@ -97,6 +97,15 @@ def test_explanation_failure_degrades_but_stores(tmp_path, original, monkeypatch
     assert store.load(record["record_id"])["flags"].count("explanation_failed") == 1
 
 
+def test_ingest_ephemeral_returns_record_without_a_store(original, monkeypatch):
+    monkeypatch.setattr(extract, "extract_record",
+                        lambda path, tier="fast", **kw: valid_record(confidence="high"))
+    monkeypatch.setattr(explain, "explain_record", _no_op_explain)
+    rec, report = ingest.ingest_ephemeral(original)
+    assert rec["record_id"] == report.record_id
+    assert report.needs_review in ("Y", "N")
+
+
 def test_escalation_failure_falls_back_to_fast(tmp_path, original, monkeypatch):
     def fake_extract(path, tier="fast", **kw):
         if tier == "fast":

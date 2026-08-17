@@ -5,8 +5,15 @@ Ties the pipeline together. Shows the original image next to every extraction
 medical advice" line, and routes any typed question through the guard first.
 
 Thin by design: all logic lives in the tested modules (ingest, timeline, search,
-export, store, guard, validate). Real mode uses local_records/store/ (gitignored);
-demo mode reads synthetic records from demo_cache/store/ and is read-only.
+export, store, guard, validate).
+
+Modes:
+  - real  (a key is present locally): uploads are stored under local_records/,
+    private to the machine, and never leave it.
+  - demo  (a deploy, or no key): read-only browsing of the synthetic records in
+    demo_cache/. Uploading can be unlocked with a demo password; those uploads
+    are processed live and kept ONLY in the visitor's session (in memory), never
+    written to the shared store, so one visitor never sees another's upload.
 
 See PROJECT_SPEC.md sections 5, 8, 10, 15.
 """
@@ -30,6 +37,7 @@ from src.store import DEFAULT_ROOT, Store  # noqa: E402
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_SECRET_KEYS = ("ANTHROPIC_API_KEY", "APP_MODE", "DEMO_PASSWORD", "MAX_UPLOADS_PER_SESSION")
 
 
 # --- config & stores (pure helpers, testable) -------------------------------
@@ -44,14 +52,37 @@ def _secret(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
+def _hosted() -> bool:
+    """True when Streamlit secrets are configured, i.e. this is a deploy."""
+    try:
+        return any(k in st.secrets for k in _SECRET_KEYS)
+    except Exception:
+        return False
+
+
+def bridge_secrets() -> None:
+    """Copy Streamlit secrets into the environment so the SDK and config see them."""
+    try:
+        for k in _SECRET_KEYS:
+            if k in st.secrets and not os.environ.get(k):
+                os.environ[k] = str(st.secrets[k])
+    except Exception:
+        pass
+
+
 def cfg() -> dict:
     key = os.getenv("ANTHROPIC_API_KEY", "")
     has_key = bool(key and key != "paste-your-key-here")
-    # Without a key we cannot run real mode, so fall back to the safe read-only
-    # demo. An explicit APP_MODE always wins. This keeps a public deploy, which
-    # carries no key, in demo mode by default.
-    explicit = _secret("APP_MODE", "")
-    mode = (explicit or ("real" if has_key else "demo")).lower()
+    # An explicit APP_MODE always wins. A deploy (secrets present) defaults to the
+    # safe demo even when a key is set, so a hosted app never silently runs real
+    # mode. Locally, real mode is the default when a key is present.
+    explicit = _secret("APP_MODE", "").lower()
+    if explicit in ("demo", "real"):
+        mode = explicit
+    elif _hosted():
+        mode = "demo"
+    else:
+        mode = "real" if has_key else "demo"
     return {
         "mode": mode,
         "demo_password": _secret("DEMO_PASSWORD", ""),
@@ -76,6 +107,28 @@ def export_filename(day: str | None = None) -> str:
 
 def _nz(s):
     return s.strip() if isinstance(s, str) and s.strip() else None
+
+
+# --- record sources ---------------------------------------------------------
+
+def all_records(store: Store, c: dict) -> list:
+    """Stored records, plus this session's ephemeral demo uploads (demo mode)."""
+    records = list(store.list())
+    extra = st.session_state.get("session_records") or []
+    if c["mode"] == "demo" and extra:
+        records = records + list(extra)
+        timeline.assign_episodes(records)  # cluster the combined set for display only
+    return records
+
+
+def find_record(store: Store, rid: str):
+    for r in (st.session_state.get("session_records") or []):
+        if r.get("record_id") == rid:
+            return r
+    try:
+        return store.load(rid)
+    except Exception:
+        return None
 
 
 # --- small view helpers -----------------------------------------------------
@@ -115,12 +168,12 @@ def _render_readonly(rec: dict) -> None:
         st.markdown(f"**Follow-up:** {rec['follow_up']}")
 
 
-# --- pages ------------------------------------------------------------------
+# --- upload -----------------------------------------------------------------
 
 def page_upload(store: Store, c: dict) -> None:
     st.header("Upload a document")
     if c["mode"] == "demo":
-        st.info("Upload is disabled in demo mode.")
+        _demo_upload(c)
         return
     if not c["has_key"]:
         st.warning("No ANTHROPIC_API_KEY found. Paste your key into .env to enable extraction.")
@@ -158,11 +211,70 @@ def page_upload(store: Store, c: dict) -> None:
         st.rerun()
 
 
-def page_timeline(store: Store) -> None:
+def _demo_upload(c: dict) -> None:
+    if not c["has_key"] or not c["demo_password"]:
+        st.info("Uploading is not enabled in this demo.")
+        return
+
+    if not st.session_state.demo_unlocked:
+        st.write("Enter the demo password to try uploading a document.")
+        pw = st.text_input("Demo password", type="password")
+        if st.button("Unlock upload"):
+            if pw == c["demo_password"]:
+                st.session_state.demo_unlocked = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+        return
+
+    st.success("Upload unlocked for this session.")
+    st.warning(
+        "Please upload a sample image, not a real personal record. Your upload is "
+        "processed live and kept only in this browser session; it is not saved, and "
+        "no one else can see it."
+    )
+    st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
+
+    up = st.file_uploader(
+        "Prescription, lab report, or discharge summary",
+        type=["png", "jpg", "jpeg", "webp", "pdf"],
+    )
+    if up is None:
+        return
+    if st.session_state.uploads >= c["max_uploads"]:
+        st.error("Upload limit reached for this session.")
+        return
+
+    if st.button("Digitise this document", type="primary"):
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, up.name)
+        with open(path, "wb") as f:
+            f.write(up.getbuffer())
+        try:
+            with st.spinner("Reading and explaining (kept in this session only)..."):
+                rec, report = ingest.ingest_ephemeral(path)
+        except Exception as e:
+            st.error(f"Could not process this document: {e}")
+            return
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        st.session_state.session_records.append(rec)
+        st.session_state.session_originals[rec["record_id"]] = (up.getvalue(), up.name)
+        st.session_state.uploads += 1
+        note = "needs review" if report.needs_review == "Y" else "read cleanly"
+        st.success(f"Done ({report.tier_used} read) — {note}. Kept in this session only.")
+        st.session_state.selected = rec["record_id"]
+        st.rerun()
+
+
+# --- browse / search / export ----------------------------------------------
+
+def page_timeline(store: Store, c: dict) -> None:
     st.header("Timeline")
-    records = store.list()
+    records = all_records(store, c)
     if not records:
-        st.info("No records yet. Upload a document to get started.")
+        st.info("No records yet.")
         return
     for ep in timeline.build_timeline(records):
         with st.expander(ep.label):
@@ -176,12 +288,12 @@ def page_timeline(store: Store) -> None:
                     st.rerun()
 
 
-def page_search(store: Store) -> None:
+def page_search(store: Store, c: dict) -> None:
     st.header("Search")
     q = st.text_input("Search your records (a medicine, a test, a doctor, a condition)")
     if not q:
         return
-    resp = search.search(q, store.list())
+    resp = search.search(q, all_records(store, c))
     if resp.status == "refused":
         st.warning(resp.message)
         return
@@ -202,9 +314,9 @@ def page_search(store: Store) -> None:
             st.rerun()
 
 
-def page_export(store: Store) -> None:
+def page_export(store: Store, c: dict) -> None:
     st.header("Export a doctor-ready summary")
-    records = store.list()
+    records = all_records(store, c)
     if not records:
         st.info("No records to export yet.")
         return
@@ -313,16 +425,26 @@ def render_record_detail(store: Store, rec: dict, c: dict) -> None:
         st.session_state.selected = None
         st.rerun()
 
+    rid = rec["record_id"]
+    is_session = rid in (st.session_state.get("session_originals") or {})
+
     left, right = st.columns(2)
     with left:
         st.subheader("Original")
-        op = store.original_path(rec["record_id"])
-        if op and os.path.splitext(op)[1].lower() in _IMAGE_EXTS:
-            st.image(op, use_container_width=True)
-        elif op:
-            st.info(f"Original on file: {os.path.basename(op)}")
+        if is_session:
+            data, name = st.session_state.session_originals[rid]
+            if os.path.splitext(name)[1].lower() in _IMAGE_EXTS:
+                st.image(data, use_container_width=True)
+            else:
+                st.info(f"Original on file: {name}")
         else:
-            st.caption("No original on file.")
+            op = store.original_path(rid)
+            if op and os.path.splitext(op)[1].lower() in _IMAGE_EXTS:
+                st.image(op, use_container_width=True)
+            elif op:
+                st.info(f"Original on file: {os.path.basename(op)}")
+            else:
+                st.caption("No original on file.")
 
     with right:
         badge = "⚠ Needs review" if rec.get("needs_review") == "Y" else "✓ Reviewed"
@@ -335,71 +457,60 @@ def render_record_detail(store: Store, rec: dict, c: dict) -> None:
             st.warning("Flagged for review: " + ", ".join(validate.evaluate(rec).reasons))
         _render_readonly(rec)
 
-    if c["mode"] != "demo":
+    # Editing writes to the store, so it is only offered for stored (real-mode)
+    # records, never for a session-only demo upload.
+    if c["mode"] != "demo" and not is_session:
         st.divider()
         _edit_form(store, rec)
 
 
 # --- entry point ------------------------------------------------------------
 
-def _demo_gate(c: dict) -> bool:
-    if not c["demo_password"] or st.session_state.demo_ok:
-        return True
-    st.subheader("Demo access")
-    pw = st.text_input("Demo password", type="password")
-    if st.button("Enter"):
-        if pw == c["demo_password"]:
-            st.session_state.demo_ok = True
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
-    return False
-
-
 def main() -> None:
     st.set_page_config(page_title="Medical Records Tracker", layout="wide")
+    bridge_secrets()
+
     ss = st.session_state
     ss.setdefault("selected", None)
     ss.setdefault("uploads", 0)
-    ss.setdefault("demo_ok", False)
+    ss.setdefault("demo_unlocked", False)
+    ss.setdefault("session_records", [])
+    ss.setdefault("session_originals", {})
 
     c = cfg()
     store = store_for(c["mode"])
 
     st.title("Medical Records Tracker")
     st.caption("🛈 " + guard.STANDING_NOTICE)
-
-    if c["mode"] == "demo" and not _demo_gate(c):
-        return
+    if c["mode"] == "demo":
+        st.info(
+            "Demo mode: browsing synthetic sample records. Uploading can be unlocked "
+            "with the demo password; those uploads are processed live and kept only in "
+            "your session (never saved, never shared). Please do not upload real records."
+        )
 
     with st.sidebar:
         st.markdown(f"**Mode:** {c['mode']}")
-        if c["mode"] == "demo":
-            st.caption("Read-only demo (synthetic records).")
-        default = 1 if c["mode"] == "demo" else 0
-        page = st.radio("Go to", ["Upload", "Timeline", "Search", "Export"], index=default)
+        page = st.radio("Go to", ["Upload", "Timeline", "Search", "Export"], index=0)
         if ss.selected and st.button("Clear selection"):
             ss.selected = None
             st.rerun()
 
     if ss.selected:
-        rec = None
-        try:
-            rec = store.load(ss.selected)
-        except Exception:
-            ss.selected = None
+        rec = find_record(store, ss.selected)
         if rec:
             render_record_detail(store, rec, c)
             return
+        ss.selected = None
 
     if page == "Upload":
         page_upload(store, c)
     elif page == "Timeline":
-        page_timeline(store)
+        page_timeline(store, c)
     elif page == "Search":
-        page_search(store)
+        page_search(store, c)
     elif page == "Export":
-        page_export(store)
+        page_export(store, c)
 
 
 if __name__ == "__main__":

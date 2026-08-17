@@ -22,6 +22,8 @@ See PROJECT_SPEC.md sections 6, 7, 14.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 
 from src import explain, extract, model, validate
@@ -98,3 +100,17 @@ def ingest_record(
         explanations_withheld=withheld,
         errors=errors,
     )
+
+
+def ingest_ephemeral(image_path: str, **kwargs):
+    """Run the full pipeline but persist nothing: ingest into a throwaway store
+    that is deleted immediately, returning the in-memory (record, IngestReport).
+
+    Used by the hosted demo, where an uploaded document is processed live and
+    kept only in the visitor's session, never written to the shared store.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        return ingest_record(image_path, Store(tmp), **kwargs)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
