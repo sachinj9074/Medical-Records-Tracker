@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "medrec",
+      "runtimeExecutable": "streamlit",
+      "runtimeArgs": ["run", "src/app.py", "--server.port", "8520", "--server.headless", "true"],
+      "port": 8520
+    }
+  ]
+}
