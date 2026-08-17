@@ -1,0 +1,48 @@
+{
+  "document_type": "prescription",
+  "record_date": "2026-02-10",
+  "provider": {
+    "name": "Dr. Anil Rao",
+    "specialty": "General Medicine",
+    "clinic": "Sunrise Family Clinic"
+  },
+  "patient": {
+    "name": "Rahul Mehta",
+    "age": 32,
+    "sex": "M"
+  },
+  "diagnosis": {
+    "stated_text": "Acute pharyngitis",
+    "plain_language": "Acute pharyngitis is a recent-onset inflammation of the throat, commonly known as a sore throat."
+  },
+  "medications": [
+    {
+      "name": "Amoxicillin",
+      "strength": "500 mg",
+      "form": "Tablet",
+      "dose": "1 tablet",
+      "frequency": "twice daily",
+      "duration": "5 days",
+      "purpose_plain": "Amoxicillin is an antibiotic used to treat infections caused by bacteria."
+    },
+    {
+      "name": "Paracetamol",
+      "strength": "650 mg",
+      "form": "Tablet",
+      "dose": "1 tablet",
+      "frequency": "three times a day",
+      "duration": "3 days",
+      "purpose_plain": "Paracetamol is a medicine generally used to relieve pain and reduce fever."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Warm saline gargles. Rest and plenty of fluids.",
+  "follow_up": "Review after 5 days if not improving.",
+  "confidence": "high",
+  "flags": [],
+  "record_id": "rec_4ecc58961558",
+  "episode_id": "ep_6734e503c808",
+  "source_filename": "sample_01_pharyngitis.png",
+  "date_processed": "2026-08-17",
+  "needs_review": "N"
+}

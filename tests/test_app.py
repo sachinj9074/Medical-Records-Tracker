@@ -24,6 +24,25 @@ def test_nz_normalises_blanks():
     assert app._nz(None) is None
 
 
+def test_cfg_defaults_to_demo_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("APP_MODE", raising=False)
+    assert app.cfg()["mode"] == "demo"
+
+
+def test_cfg_real_mode_when_key_present(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.delenv("APP_MODE", raising=False)
+    c = app.cfg()
+    assert c["mode"] == "real" and c["has_key"] is True
+
+
+def test_cfg_explicit_mode_overrides(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("APP_MODE", "demo")
+    assert app.cfg()["mode"] == "demo"
+
+
 def test_record_title_prefers_diagnosis():
     r = {"record_date": "2025-01-01", "document_type": "prescription",
          "diagnosis": {"stated_text": "DRY ECZEMA"}}

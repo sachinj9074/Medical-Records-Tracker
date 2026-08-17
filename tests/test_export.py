@@ -19,7 +19,7 @@ def inv(name, **kw):
 
 def rec(rid, *, date="2025-01-01", episode_id="ep_1", provider="Dr Tupe",
         dtype="prescription", diagnosis=None, dx_plain=None, meds=None, invs=None,
-        advice=None, follow_up=None, needs_review="N", patient_name="Sachin Juluri",
+        advice=None, follow_up=None, needs_review="N", patient_name="Rahul Mehta",
         sex="M", age=28, source="scan.jpg"):
     return {
         "record_id": rid, "episode_id": episode_id, "record_date": date,
@@ -40,7 +40,7 @@ def rec(rid, *, date="2025-01-01", episode_id="ep_1", provider="Dr Tupe",
 def test_header_has_patient_period_generated_and_notice():
     out = export.render_summary([rec("a", date="2024-09-21"), rec("b", date="2026-03-23")])
     assert "# Medical records summary" in out
-    assert "Sachin Juluri (M, 28)" in out
+    assert "Rahul Mehta (M, 28)" in out
     assert "2024-09-21 to 2026-03-23" in out
     assert "**Generated:**" in out
     assert guard.STANDING_NOTICE in out

@@ -1,0 +1,59 @@
+{
+  "document_type": "prescription",
+  "record_date": "2026-03-05",
+  "provider": {
+    "name": "Dr. S. Kapoor",
+    "specialty": null,
+    "clinic": "City Dental Care"
+  },
+  "patient": {
+    "name": "Rahul Mehta",
+    "age": 32,
+    "sex": "M"
+  },
+  "diagnosis": {
+    "stated_text": "Irrev. pulpitis 46",
+    "plain_language": "Irreversible pulpitis is inflammation of the soft inner tissue (pulp) of a tooth that does not settle on its own; the number 46 refers to a specific tooth in dental notation."
+  },
+  "medications": [
+    {
+      "name": "Augmentin",
+      "strength": "625",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "twice daily (morning and night)",
+      "duration": "5 days",
+      "purpose_plain": "Augmentin is an antibiotic that combines amoxicillin with clavulanic acid, generally used to treat bacterial infections."
+    },
+    {
+      "name": "Brufen",
+      "strength": "400",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "three times daily (morning, afternoon and night)",
+      "duration": "3 days",
+      "purpose_plain": "Brufen is a brand of ibuprofen, a non-steroidal anti-inflammatory medicine generally used to relieve pain and reduce inflammation and fever."
+    },
+    {
+      "name": "Pan",
+      "strength": "40",
+      "form": "capsule",
+      "dose": "1 capsule",
+      "frequency": "once daily (morning), before food",
+      "duration": null,
+      "purpose_plain": "Pan is a brand of pantoprazole, a medicine that reduces stomach acid and is generally used for acid-related stomach conditions."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Soft diet, avoid cold. RCT adv.",
+  "follow_up": "Review 3d",
+  "confidence": "high",
+  "flags": [
+    "handwritten"
+  ],
+  "record_id": "rec_3eeb50d6b6bc",
+  "episode_id": "ep_aebfc1067bc9",
+  "source_filename": "sample_02_toothpain.png",
+  "date_processed": "2026-08-17",
+  "needs_review": "N"
+}

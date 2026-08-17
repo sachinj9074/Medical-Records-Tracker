@@ -34,13 +34,29 @@ _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 # --- config & stores (pure helpers, testable) -------------------------------
 
+def _secret(name: str, default: str = "") -> str:
+    """Read config from Streamlit secrets (hosted) or the environment (local)."""
+    try:
+        if name in st.secrets:  # raises if no secrets file exists
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return os.getenv(name, default)
+
+
 def cfg() -> dict:
     key = os.getenv("ANTHROPIC_API_KEY", "")
+    has_key = bool(key and key != "paste-your-key-here")
+    # Without a key we cannot run real mode, so fall back to the safe read-only
+    # demo. An explicit APP_MODE always wins. This keeps a public deploy, which
+    # carries no key, in demo mode by default.
+    explicit = _secret("APP_MODE", "")
+    mode = (explicit or ("real" if has_key else "demo")).lower()
     return {
-        "mode": os.getenv("APP_MODE", "real").lower(),
-        "demo_password": os.getenv("DEMO_PASSWORD", ""),
-        "max_uploads": int(os.getenv("MAX_UPLOADS_PER_SESSION", "10") or 10),
-        "has_key": bool(key and key != "paste-your-key-here"),
+        "mode": mode,
+        "demo_password": _secret("DEMO_PASSWORD", ""),
+        "max_uploads": int(_secret("MAX_UPLOADS_PER_SESSION", "10") or 10),
+        "has_key": has_key,
     }
 
 

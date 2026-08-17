@@ -1,0 +1,48 @@
+{
+  "document_type": "prescription",
+  "record_date": "2026-04-02",
+  "provider": {
+    "name": "Dr. Neha Verma",
+    "specialty": "Dermatology",
+    "clinic": "Skin & Care Dermatology"
+  },
+  "patient": {
+    "name": "Rahul Mehta",
+    "age": 32,
+    "sex": "M"
+  },
+  "diagnosis": {
+    "stated_text": "Allergic contact dermatitis, left upper eyelid",
+    "plain_language": "Allergic contact dermatitis is an itchy, inflamed skin reaction that occurs when the skin touches a substance it is allergic to; here it is described on the left upper eyelid."
+  },
+  "medications": [
+    {
+      "name": "Mometasone Furoate",
+      "strength": "0.1%",
+      "form": "Ointment",
+      "dose": "apply thin layer",
+      "frequency": "once daily",
+      "duration": "7 days",
+      "purpose_plain": "Mometasone furoate is a corticosteroid ointment generally used to reduce skin inflammation, redness, and itching."
+    },
+    {
+      "name": "Levocetirizine",
+      "strength": "5 mg",
+      "form": "Tablet",
+      "dose": "1 tablet",
+      "frequency": "at night",
+      "duration": "7 days",
+      "purpose_plain": "Levocetirizine is an antihistamine tablet generally used to relieve allergy symptoms such as itching."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Avoid rubbing the area. Avoid new cosmetics or soaps near the eye.",
+  "follow_up": "Review after 1 week.",
+  "confidence": "high",
+  "flags": [],
+  "record_id": "rec_fc3acd7f23b1",
+  "episode_id": "ep_354cef59fac1",
+  "source_filename": "sample_04_eye_rash.png",
+  "date_processed": "2026-08-17",
+  "needs_review": "N"
+}

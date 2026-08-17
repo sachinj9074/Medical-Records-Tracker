@@ -1,0 +1,62 @@
+{
+  "document_type": "lab_report",
+  "record_date": "2026-01-15",
+  "provider": {
+    "name": "Dr. Anil Rao",
+    "specialty": null,
+    "clinic": "MedLab Diagnostics"
+  },
+  "patient": {
+    "name": "Rahul Mehta",
+    "age": 32,
+    "sex": "M"
+  },
+  "diagnosis": {
+    "stated_text": null,
+    "plain_language": null
+  },
+  "medications": [],
+  "investigations": [
+    {
+      "name": "HbA1c",
+      "value": "7.8",
+      "unit": "%",
+      "reference_range": "< 5.7",
+      "flag": "high",
+      "plain_note": "HbA1c is a blood test that reflects average blood sugar levels over roughly the past few months."
+    },
+    {
+      "name": "Fasting Plasma Glucose",
+      "value": "142",
+      "unit": "mg/dL",
+      "reference_range": "70 - 100",
+      "flag": "high",
+      "plain_note": "Fasting Plasma Glucose is a blood test that measures the level of sugar in the blood after a period without eating."
+    },
+    {
+      "name": "Total Cholesterol",
+      "value": "185",
+      "unit": "mg/dL",
+      "reference_range": "< 200",
+      "flag": "unknown",
+      "plain_note": "Total Cholesterol is a blood test that measures the overall amount of cholesterol, a type of fat, in the blood."
+    },
+    {
+      "name": "Serum Creatinine",
+      "value": "0.9",
+      "unit": "mg/dL",
+      "reference_range": "0.7 - 1.3",
+      "flag": "unknown",
+      "plain_note": "Serum Creatinine is a blood test that measures a waste product, often used as a general indicator of how the kidneys are working."
+    }
+  ],
+  "advice_verbatim": null,
+  "follow_up": null,
+  "confidence": "high",
+  "flags": [],
+  "record_id": "rec_899b6e88ade1",
+  "episode_id": "ep_6734e503c808",
+  "source_filename": "sample_03_diabetes_lab.png",
+  "date_processed": "2026-08-17",
+  "needs_review": "N"
+}
