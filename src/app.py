@@ -175,6 +175,10 @@ def page_upload(store: Store, c: dict) -> None:
     if c["mode"] == "demo":
         _demo_upload(c)
         return
+    st.caption(
+        "Add a prescription, lab report, or discharge summary. It is read, explained "
+        "in plain language, filed on your timeline, and saved privately on this machine."
+    )
     if not c["has_key"]:
         st.warning("No ANTHROPIC_API_KEY found. Paste your key into .env to enable extraction.")
     st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
@@ -190,48 +194,57 @@ def page_upload(store: Store, c: dict) -> None:
         return
 
     if st.button("Digitise this document", type="primary"):
-        tmpdir = tempfile.mkdtemp()
-        path = os.path.join(tmpdir, up.name)
-        with open(path, "wb") as f:
-            f.write(up.getbuffer())
-        try:
-            with st.spinner("Reading, explaining, and filing the document..."):
-                rec, report = ingest.ingest_record(path, store)
-                timeline.recluster(store)
-        except Exception as e:
-            st.error(f"Could not process this document: {e}")
+        rec, report = _run_ingest(up, lambda p: _stored_ingest(store, p))
+        if rec is None:
             return
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
         st.session_state.uploads += 1
         note = "needs your review" if report.needs_review == "Y" else "filed"
-        st.success(f"Done ({report.tier_used} read) — this record {note}.")
+        st.success(f"Done ({report.tier_used} read). This record {note}.")
         st.session_state.selected = rec["record_id"]
         st.rerun()
 
 
+def _stored_ingest(store: Store, path: str):
+    rec, report = ingest.ingest_record(path, store)
+    timeline.recluster(store)
+    return rec, report
+
+
+def _run_ingest(up, ingest_fn):
+    """Write the upload to a temp file, run ingest_fn(path), clean up. Returns
+    (record, report) or (None, None) on failure (error already surfaced)."""
+    tmpdir = tempfile.mkdtemp()
+    path = os.path.join(tmpdir, up.name)
+    with open(path, "wb") as f:
+        f.write(up.getbuffer())
+    try:
+        with st.spinner("Reading and explaining the document..."):
+            return ingest_fn(path)
+    except Exception as e:
+        st.error(f"Could not process this document: {e}")
+        return None, None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def _demo_upload(c: dict) -> None:
-    if not c["has_key"] or not c["demo_password"]:
-        st.info("Uploading is not enabled in this demo.")
+    if not (c["has_key"] and c["demo_password"]):
+        st.info(
+            "Uploading is not enabled in this demo. Browse the sample records from "
+            "the Timeline or Search."
+        )
         return
-
     if not st.session_state.demo_unlocked:
-        st.write("Enter the demo password to try uploading a document.")
-        pw = st.text_input("Demo password", type="password")
-        if st.button("Unlock upload"):
-            if pw == c["demo_password"]:
-                st.session_state.demo_unlocked = True
-                st.rerun()
-            else:
-                st.error("Incorrect password.")
+        st.info(
+            "Uploading is locked. Enter the demo password in the left sidebar to "
+            "enable it for this session."
+        )
         return
 
-    st.success("Upload unlocked for this session.")
-    st.warning(
-        "Please upload a sample image, not a real personal record. Your upload is "
-        "processed live and kept only in this browser session; it is not saved, and "
-        "no one else can see it."
+    st.caption(
+        "Upload a prescription, lab report, or discharge summary. It is processed "
+        "live and kept only in this browser session: never saved to the app, and "
+        "not visible to anyone else."
     )
     st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
 
@@ -246,24 +259,14 @@ def _demo_upload(c: dict) -> None:
         return
 
     if st.button("Digitise this document", type="primary"):
-        tmpdir = tempfile.mkdtemp()
-        path = os.path.join(tmpdir, up.name)
-        with open(path, "wb") as f:
-            f.write(up.getbuffer())
-        try:
-            with st.spinner("Reading and explaining (kept in this session only)..."):
-                rec, report = ingest.ingest_ephemeral(path)
-        except Exception as e:
-            st.error(f"Could not process this document: {e}")
+        rec, report = _run_ingest(up, lambda p: ingest.ingest_ephemeral(p))
+        if rec is None:
             return
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
         st.session_state.session_records.append(rec)
         st.session_state.session_originals[rec["record_id"]] = (up.getvalue(), up.name)
         st.session_state.uploads += 1
         note = "needs review" if report.needs_review == "Y" else "read cleanly"
-        st.success(f"Done ({report.tier_used} read) — {note}. Kept in this session only.")
+        st.success(f"Done ({report.tier_used} read), {note}. Kept in this session only.")
         st.session_state.selected = rec["record_id"]
         st.rerun()
 
@@ -272,9 +275,10 @@ def _demo_upload(c: dict) -> None:
 
 def page_timeline(store: Store, c: dict) -> None:
     st.header("Timeline")
+    st.caption("Your records grouped into episodes of care, newest first. Open one to see the original alongside the reading.")
     records = all_records(store, c)
     if not records:
-        st.info("No records yet.")
+        st.info("No records yet. Add one from the Upload page to get started.")
         return
     for ep in timeline.build_timeline(records):
         with st.expander(ep.label):
@@ -290,6 +294,7 @@ def page_timeline(store: Store, c: dict) -> None:
 
 def page_search(store: Store, c: dict) -> None:
     st.header("Search")
+    st.caption("Find a record by what is written on it. Medical-advice questions are declined and sent back to a doctor.")
     q = st.text_input("Search your records (a medicine, a test, a doctor, a condition)")
     if not q:
         return
@@ -316,6 +321,7 @@ def page_search(store: Store, c: dict) -> None:
 
 def page_export(store: Store, c: dict) -> None:
     st.header("Export a doctor-ready summary")
+    st.caption("A clean, facts-only Markdown summary you can download and hand to a new doctor.")
     records = all_records(store, c)
     if not records:
         st.info("No records to export yet.")
@@ -466,6 +472,42 @@ def render_record_detail(store: Store, rec: dict, c: dict) -> None:
 
 # --- entry point ------------------------------------------------------------
 
+def _sidebar_status(c: dict) -> None:
+    """Compact mode card and, in a demo that allows it, the upload-unlock control.
+
+    Lives in the sidebar so the main area stays focused on the records. The
+    unlock form is instantiated before the nav radio (see main) so a successful
+    unlock can steer navigation without tripping Streamlit's widget-state guard.
+    """
+    if c["mode"] == "real":
+        st.success("**Local mode**")
+        st.caption("Records are saved privately on this machine.")
+        return
+
+    if st.session_state.demo_unlocked:
+        st.success("**Live session**")
+        st.caption(
+            "Uploads enabled. Anything you add stays in this browser session only: "
+            "never saved, never shared."
+        )
+        return
+
+    st.info("**Demo**")
+    st.caption("Browsing sample records.")
+    if not (c["has_key"] and c["demo_password"]):
+        return
+    with st.form("unlock_form"):
+        st.caption("Have the demo password? Enable uploads for this session.")
+        pw = st.text_input("Demo password", type="password")
+        if st.form_submit_button("Enable uploads"):
+            if pw == c["demo_password"]:
+                st.session_state.demo_unlocked = True
+                st.session_state.nav = "Upload"  # radio not yet built this run
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+
+
 def main() -> None:
     st.set_page_config(page_title="Medical Records Tracker", layout="wide")
     bridge_secrets()
@@ -482,19 +524,19 @@ def main() -> None:
 
     st.title("Medical Records Tracker")
     st.caption("🛈 " + guard.STANDING_NOTICE)
-    if c["mode"] == "demo":
-        st.info(
-            "Demo mode: browsing synthetic sample records. Uploading can be unlocked "
-            "with the demo password; those uploads are processed live and kept only in "
-            "your session (never saved, never shared). Please do not upload real records."
-        )
 
+    pages = ["Upload", "Timeline", "Search", "Export"]
+    # A locked demo lands on the populated Timeline (content to explore); anywhere
+    # you can add records lands on Upload. Seed the nav value before the radio is
+    # built so it is driven purely by session state (no default-vs-state warning).
+    ss.setdefault("nav", "Timeline" if (c["mode"] == "demo" and not ss.demo_unlocked) else "Upload")
     with st.sidebar:
-        st.markdown(f"**Mode:** {c['mode']}")
-        page = st.radio("Go to", ["Upload", "Timeline", "Search", "Export"], index=0)
-        if ss.selected and st.button("Clear selection"):
-            ss.selected = None
-            st.rerun()
+        st.markdown("### Medical Records Tracker")
+        nav_slot = st.container()          # visual home for the radio (rendered last)
+        st.divider()
+        _sidebar_status(c)                 # may set ss.nav then rerun
+        with nav_slot:
+            page = st.radio("Go to", pages, key="nav")
 
     if ss.selected:
         rec = find_record(store, ss.selected)
