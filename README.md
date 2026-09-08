@@ -141,9 +141,9 @@ Note that the printed `[HIGH]` flags are carried through exactly as the report p
 
 Testing is built into the design, at three levels:
 
-- **An automated suite of 122 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips, the full ingest chain, episode clustering, guarded search, the export format, and the sign-in and per-user isolation.
+- **An automated suite of 132 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips, the full ingest chain, episode clustering, guarded search, the export format, the sign-in and per-user isolation, and the eval scorer's own logic.
 - **Real-document testing** against actual handwritten prescriptions is what shaped the pipeline. It surfaced the fast tier's invented-dosing failure (see design decision 2), which the fast→judgment escalation now handles. That finding is the reason escalation exists.
-- **A labelled eval set** (`eval/eval_set/`) pairs each synthetic sample with its ground-truth fields, expected confidence, and expected `needs review` verdict, ready for a scorer that measures extraction accuracy, explanation fidelity, correct refusal, and needs-review correctness. The scorer itself (`eval/run_eval.py`) is the next piece to build; the labels are in place.
+- **A one-command eval scorer** (`python eval/run_eval.py`) runs the real pipeline over a labelled synthetic set and reports the four metrics. Latest run: **extraction 97%, explanation fidelity 93%, correct refusal 100%, needs-review 75%** (see [eval/RESULTS.md](eval/RESULTS.md)). Fidelity uses an independent judge, deliberately stricter than the in-pipeline guard; the one residual flag is a diagnosis note that restated the patient's body site, and the needs-review miss is escalation correctly clearing a handwritten read the label assumed would be flagged. The scorer is a measurement tool (baselines over synthetic data), with a `--strict` mode as a CI gate on the safety metrics.
 
 ## Modes and privacy
 
@@ -157,7 +157,7 @@ The original scan is always retained and shown next to the extraction, because t
 ## Scope and honest limitations
 
 - **It advises nothing.** Every output is a transcription, an organisation, or a neutral explanation, never a clinical judgment.
-- **The eval scorer is not built yet.** The test suite and the labelled set exist; the one-command accuracy scorer over that set is still to come.
+- **The eval set is small and synthetic.** The scorer is built and runs the real pipeline over four labelled samples; the numbers are honest baselines, not a large-scale accuracy claim. A bigger, more varied set is the next step.
 - **Episode clustering is deterministic and literal.** It groups on exact provider, medicine, and diagnosis-keyword matches within a time window; it will not spot that two differently-named conditions are actually related.
 - **Sign-in and per-user isolation are demonstrable, not a hosted service.** Each user has a private store and the demo shows several isolated profiles, but there is no durable multi-tenant database behind it: real personal use is single-user and local. Federated login (OIDC) and durable per-user storage are on the roadmap.
 - **Manual episode edits (merge/split) are not implemented.** Clustering is automatic only.
@@ -208,7 +208,7 @@ Push the repo, then at [share.streamlit.io](https://share.streamlit.io) choose *
 
 ## Roadmap
 
-- The one-command eval scorer over the labelled set (extraction accuracy, explanation fidelity, correct refusal, needs-review correctness)
+- A larger, more varied eval set (the scorer exists; grow the labelled data)
 - A value-forward UI redesign (lead with the timeline and the doctor-ready export)
 - Manual episode merge and split
 - Federated login (OIDC) and durable per-user storage for true multi-user hosting

@@ -24,3 +24,6 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+
+# eval run artifact (RESULTS.md is the committed summary)
+eval/eval_log.csv

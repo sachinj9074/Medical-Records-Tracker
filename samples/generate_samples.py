@@ -220,6 +220,7 @@ DOCS = [
         "clinic": "MedLab Diagnostics",
         "clinic_addr": "24 Residency Road, Bengaluru   |   NABL Accredited",
         "referred_by": "Dr. Anil Rao",
+        "provider_name": "Dr. Anil Rao",  # referring doctor; extraction reads this as provider.name
         "report_title": "BIOCHEMISTRY REPORT",
         "date_display": "15-Jan-2026",
         "record_date": "2026-01-15",

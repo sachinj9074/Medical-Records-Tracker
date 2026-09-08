@@ -234,17 +234,18 @@ Testing on real handwritten prescriptions surfaced a specific, repeatable failur
 
 ## 10. Evals and testing
 
-**Test suite (built, passing): 122 tests via `pytest`.** They cover every part where consistency matters and the model is not involved: schema validation and the `needs_review` signals, the guard's refuse/allow categories, the explanation fidelity guard (that it never introduces a number or a directive), storage round-trips, the full ingest chain (including the escalation branch and graceful degradation), episode clustering, guarded search, the export format, and the sign-in and per-user store isolation (password hashing, authenticate success/failure, and that two users resolve to different roots).
+**Test suite (built, passing): 132 tests via `pytest`.** They cover every part where consistency matters and the model is not involved: schema validation and the `needs_review` signals, the guard's refuse/allow categories, the explanation fidelity guard (that it never introduces a number or a directive), storage round-trips, the full ingest chain (including the escalation branch and graceful degradation), episode clustering, guarded search, the export format, the sign-in and per-user store isolation (password hashing, authenticate success/failure, and that two users resolve to different roots), and the eval scorer's own comparison logic.
 
 **Real-document testing** against actual handwritten prescriptions is what produced the escalation finding in section 9.
 
-**The labelled eval set** (`eval/eval_set/`, four synthetic samples) pairs each sample with its ground-truth fields, expected confidence, and expected `needs_review` verdict. It exists for a scorer that measures the four success metrics below. **Honest status: the scorer (`eval/run_eval.py`) is a stub (a TODO); the labels are in place but the one-command accuracy run is not built yet.** `eval/eval_log_template.csv` defines the log shape (`timestamp, eval_type, sample_id, metric, expected, actual, pass, notes`).
+**The eval scorer is built (`python eval/run_eval.py`).** It runs the real pipeline (`ingest.ingest_ephemeral`) over a labelled synthetic set (`eval/eval_set/`) and reports the four metrics; `eval/scoring.py` holds the testable comparison logic, `eval/refusal_prompts.json` the labelled guard prompts, and it writes a committed headline table to `eval/RESULTS.md` plus a per-check CSV log. `--strict` turns it into a CI gate on the safety metrics.
 
-**The four eval metrics (from the spec, mapped to the success criteria):**
-1. **Extraction accuracy** on a labelled set weighted toward handwritten and low-quality images.
-2. **Explanation fidelity:** a judged check that the plain-language output contains no claim absent from the source. This is the metric that protects the safety story.
-3. **Correct-refusal rate:** medical-advice prompts the guard must decline cleanly.
-4. **Needs-review correctness:** flags fire for a real reason, not noise.
+**The four eval metrics, and the latest baseline (over 4 synthetic samples):**
+1. **Extraction accuracy** (field-level, normalised comparison): **97%** (103/106).
+2. **Explanation fidelity** (an independent LLM judge, deliberately stricter than the in-pipeline guard, that the output adds no claim absent from the source): **93%** (13/14). The one flag is a diagnosis note that restated the patient's body site; it points at a place to tighten the author prompt.
+3. **Correct refusal** (deterministic, over `refusal_prompts.json`): **100%** (27/27), zero advice prompts let through.
+4. **Needs-review correctness:** **75%** (3/4). The single miss is escalation correctly clearing a handwritten read the label assumed would be flagged, not a defect.
+   Numbers are honest baselines over a small synthetic set, not a large-scale accuracy claim.
 
 There is also a product metric, **time-to-file** (how little friction a new upload takes), because the archive only accumulates if the upload habit sticks.
 
@@ -330,7 +331,7 @@ With a key present the app starts in **real mode** and signs you in as the singl
 - **jsonschema** (Draft 2020-12): the record shape is schema-defined and every extraction is validated.
 - **Pillow** and **PyMuPDF**: image handling and rendering PDF pages to images for the vision model.
 - **hashlib / hmac** (stdlib): PBKDF2 password hashing for sign-in and per-user isolation.
-- **python-dotenv** (load the key locally), **pytest** (the 122-test suite).
+- **python-dotenv** (load the key locally), **pytest** (the 132-test suite).
 
 ---
 
@@ -361,12 +362,15 @@ src/
   export.py          # doctor-ready Markdown summary
 eval/
   eval_set/          # labelled synthetic samples (ground truth)
-  run_eval.py        # scorer (currently a stub / TODO)
+  run_eval.py        # the eval scorer (CLI: --metric / --samples / --strict)
+  scoring.py         # comparison + fidelity-judge logic (unit-tested)
+  refusal_prompts.json  # labelled advice/retrieval prompts for the guard metric
+  RESULTS.md         # committed headline table (regenerated by run_eval)
   eval_log_template.csv
 samples/             # fictional prescriptions and reports (committed)
 demo_cache/users/<id>/store/   # per-profile synthetic records + originals (committed)
 local_records/store/users/<id>/  # real records + originals (gitignored, never committed)
-tests/               # 122 tests (pytest)
+tests/               # 132 tests (pytest)
 conftest.py          # makes `import src` work under pytest
 .claude/launch.json  # dev-server config (streamlit, port 8520)
 ```
@@ -376,7 +380,7 @@ conftest.py          # makes `import src` work under pytest
 ## 16. Honest limitations
 
 - **It advises nothing.** Every output is a transcription, an organisation, or a neutral explanation, never a clinical judgment. This is a design choice, not a gap.
-- **The eval scorer is not built yet.** The test suite and the labelled set exist; the one-command accuracy scorer over that set is still to come.
+- **The eval set is small and synthetic.** The scorer is built and runs the real pipeline over four labelled samples; the numbers are honest baselines, not a large-scale accuracy claim. Growing the labelled set is the next step.
 - **Episode clustering is literal and automatic.** It groups on exact provider/medicine/diagnosis-keyword matches within 120 days; it will not spot that two differently-named conditions are related, and manual episode merge/split is not implemented yet.
 - **Search is literal.** No synonyms or stemming; it finds only what extraction captured.
 - **Access control is demonstrable, not a hosted multi-tenant service.** There is a real sign-in and per-user store isolation (proven in the demo with seeded profiles), but no durable multi-tenant database, no federated login, and no encryption-at-rest of third-party PHI. Real personal use is single-user and local; those production pieces are on the roadmap.
@@ -386,7 +390,7 @@ conftest.py          # makes `import src` work under pytest
 
 ## 17. Roadmap
 
-- The one-command eval scorer over the labelled set (extraction accuracy, explanation fidelity, correct refusal, needs-review correctness).
+- A larger, more varied labelled eval set (the scorer exists; grow the data and re-baseline).
 - A value-forward UI redesign (lead with the timeline and the doctor-ready export; guided first run).
 - Manual episode merge and split in the UI.
 - Federated login (OIDC) and durable per-user storage for true multi-user hosting; backup/restore and record delete for real personal use.
@@ -395,7 +399,7 @@ conftest.py          # makes `import src` work under pytest
 - PDF multi-document handling; broader document types (imaging reports, vaccination records).
 - Search stemming/synonyms; lab-value trend plots with zero interpretive commentary.
 
-**Done since the initial build:** multi-user access control (sign-in + per-user store isolation, with seeded demo profiles) is built and tested.
+**Done since the initial build:** (1) multi-user access control (sign-in + per-user store isolation, with seeded demo profiles); (2) the one-command eval scorer over the four metrics, with committed baselines in `eval/RESULTS.md`. Both built and tested.
 
 ---
 
