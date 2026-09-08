@@ -1,0 +1,54 @@
+{
+  "record_id": "rec_295c229ca4dc",
+  "episode_id": "ep_3676ae4f1225",
+  "source_filename": "ananya_03_thyroid_lab.png",
+  "date_processed": "2026-08-18",
+  "document_type": "lab_report",
+  "record_date": "2026-07-10",
+  "provider": {
+    "name": "Dr. R. Menon",
+    "specialty": null,
+    "clinic": "Thyrocare Labs"
+  },
+  "patient": {
+    "name": "Ananya Sharma",
+    "age": 29,
+    "sex": "F"
+  },
+  "diagnosis": {
+    "stated_text": null,
+    "plain_language": null
+  },
+  "medications": [],
+  "investigations": [
+    {
+      "name": "TSH",
+      "value": "8.9",
+      "unit": "uIU/mL",
+      "reference_range": "0.4 - 4.0",
+      "flag": "high",
+      "plain_note": "TSH (thyroid-stimulating hormone) is a blood test that reflects how the pituitary gland signals the thyroid."
+    },
+    {
+      "name": "Free T4",
+      "value": "0.7",
+      "unit": "ng/dL",
+      "reference_range": "0.8 - 1.8",
+      "flag": "low",
+      "plain_note": "Free T4 measures the level of one of the main thyroid hormones circulating in the blood."
+    },
+    {
+      "name": "Anti-TPO",
+      "value": "120",
+      "unit": "IU/mL",
+      "reference_range": "< 35",
+      "flag": "high",
+      "plain_note": "Anti-TPO is an antibody test sometimes used when investigating thyroid conditions."
+    }
+  ],
+  "advice_verbatim": null,
+  "follow_up": null,
+  "confidence": "high",
+  "flags": [],
+  "needs_review": "N"
+}

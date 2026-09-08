@@ -1,0 +1,48 @@
+{
+  "record_id": "rec_56edaea6369f",
+  "episode_id": "ep_463534db4491",
+  "source_filename": "ananya_01_bronchitis.png",
+  "date_processed": "2026-08-18",
+  "document_type": "prescription",
+  "record_date": "2026-05-12",
+  "provider": {
+    "name": "Dr. Meera Iyer",
+    "specialty": "General Medicine",
+    "clinic": "Wellspring Clinic"
+  },
+  "patient": {
+    "name": "Ananya Sharma",
+    "age": 29,
+    "sex": "F"
+  },
+  "diagnosis": {
+    "stated_text": "Acute bronchitis",
+    "plain_language": "Acute bronchitis is short-term inflammation of the main air passages of the lungs, often following a respiratory infection."
+  },
+  "medications": [
+    {
+      "name": "Azithromycin",
+      "strength": "500 mg",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "once daily",
+      "duration": "3 days",
+      "purpose_plain": "Azithromycin is an antibiotic generally used to treat certain bacterial infections."
+    },
+    {
+      "name": "Ambroxol",
+      "strength": null,
+      "form": "syrup",
+      "dose": "10 ml",
+      "frequency": "three times a day",
+      "duration": "5 days",
+      "purpose_plain": "Ambroxol is a medicine that helps thin and loosen mucus in the airways."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Steam inhalation. Avoid cold drinks.",
+  "follow_up": "Review after 5 days if cough persists.",
+  "confidence": "high",
+  "flags": [],
+  "needs_review": "N"
+}

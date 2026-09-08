@@ -1,0 +1,48 @@
+{
+  "record_id": "rec_e186a1e79798",
+  "episode_id": "ep_463534db4491",
+  "source_filename": "ananya_02_cough.png",
+  "date_processed": "2026-08-18",
+  "document_type": "prescription",
+  "record_date": "2026-06-02",
+  "provider": {
+    "name": "Dr. Meera Iyer",
+    "specialty": "General Medicine",
+    "clinic": "Wellspring Clinic"
+  },
+  "patient": {
+    "name": "Ananya Sharma",
+    "age": 29,
+    "sex": "F"
+  },
+  "diagnosis": {
+    "stated_text": "Post-infectious cough",
+    "plain_language": "A post-infectious cough is a lingering cough that can continue for some weeks after a respiratory infection has otherwise settled."
+  },
+  "medications": [
+    {
+      "name": "Levocetirizine",
+      "strength": "5 mg",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "at night",
+      "duration": "7 days",
+      "purpose_plain": "Levocetirizine is an antihistamine generally used to relieve allergy symptoms."
+    },
+    {
+      "name": "Montelukast",
+      "strength": "10 mg",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "at night",
+      "duration": "14 days",
+      "purpose_plain": "Montelukast is a medicine generally used to help manage asthma and allergy-related symptoms."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Avoid dust and smoke.",
+  "follow_up": "Review if not settling in 2 weeks.",
+  "confidence": "high",
+  "flags": [],
+  "needs_review": "N"
+}

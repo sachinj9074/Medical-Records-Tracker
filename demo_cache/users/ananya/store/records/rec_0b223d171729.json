@@ -1,0 +1,39 @@
+{
+  "record_id": "rec_0b223d171729",
+  "episode_id": "ep_3676ae4f1225",
+  "source_filename": "ananya_04_hypothyroid.png",
+  "date_processed": "2026-08-18",
+  "document_type": "prescription",
+  "record_date": "2026-07-18",
+  "provider": {
+    "name": "Dr. R. Menon",
+    "specialty": "Endocrinology",
+    "clinic": "Meridian Endocrine Clinic"
+  },
+  "patient": {
+    "name": "Ananya Sharma",
+    "age": 29,
+    "sex": "F"
+  },
+  "diagnosis": {
+    "stated_text": "Hypothyroidism",
+    "plain_language": "Hypothyroidism is a condition in which the thyroid gland does not produce enough thyroid hormone."
+  },
+  "medications": [
+    {
+      "name": "Thyronorm",
+      "strength": "50 mcg",
+      "form": "tablet",
+      "dose": "1 tablet",
+      "frequency": "once daily before breakfast",
+      "duration": null,
+      "purpose_plain": "Thyronorm is a brand of levothyroxine, a medicine that replaces or supplements the body's thyroid hormone."
+    }
+  ],
+  "investigations": [],
+  "advice_verbatim": "Take on an empty stomach.",
+  "follow_up": "Repeat TSH after 6 weeks.",
+  "confidence": "high",
+  "flags": [],
+  "needs_review": "N"
+}

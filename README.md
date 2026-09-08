@@ -134,20 +134,23 @@ Note that the printed `[HIGH]` flags are carried through exactly as the report p
 - **jsonschema** (Draft 2020-12): the record shape is schema-defined and every extraction is validated against it
 - **Pillow** and **PyMuPDF** for image handling and rendering PDF pages to images for the vision model
 - **python-dotenv** for loading `ANTHROPIC_API_KEY` from a local `.env` during development
+- **hashlib / hmac** (stdlib) for the sign-in (PBKDF2 password hashing) and per-user isolation
 - **pytest** for the test suite
 
 ## How it's tested (evals)
 
 Testing is built into the design, at three levels:
 
-- **An automated suite of 112 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips, the full ingest chain, episode clustering, guarded search, and the export format.
+- **An automated suite of 122 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips, the full ingest chain, episode clustering, guarded search, the export format, and the sign-in and per-user isolation.
 - **Real-document testing** against actual handwritten prescriptions is what shaped the pipeline. It surfaced the fast tier's invented-dosing failure (see design decision 2), which the fast→judgment escalation now handles. That finding is the reason escalation exists.
 - **A labelled eval set** (`eval/eval_set/`) pairs each synthetic sample with its ground-truth fields, expected confidence, and expected `needs review` verdict, ready for a scorer that measures extraction accuracy, explanation fidelity, correct refusal, and needs-review correctness. The scorer itself (`eval/run_eval.py`) is the next piece to build; the labels are in place.
 
 ## Modes and privacy
 
-- **Real mode** (a key is present locally): you upload your own documents; they are stored privately under a git-ignored `local_records/` folder and never leave your machine.
-- **Demo mode** (a deploy, or no key, or `APP_MODE=demo`): read-only browsing of the synthetic records in `demo_cache/`. Uploading can be unlocked with a demo password; those uploads are processed live and kept **only in the visitor's browser session**, never written to shared storage. A deploy always defaults to demo, even if a key is set, so a hosted app never silently runs real mode.
+Every user signs in, and **each user's records live under their own store root**, so one user can never see another's: isolation by construction.
+
+- **Real mode** (a key is present locally): a single local account (you). Sign-in is frictionless by default; set `APP_PASSWORD` to gate it. Your documents are stored privately under a git-ignored `local_records/` folder and never leave your machine.
+- **Demo mode** (a deploy, or no key, or `APP_MODE=demo`): seeded demo profiles, each owning a synthetic archive under `demo_cache/`. Log in as one profile, then another, and you see only that profile's records (the demo passwords are shown on the login screen, since the data is fictional). Where a key is configured, a logged-in profile can also upload; those uploads are processed live and kept **only in the visitor's browser session**, never written to shared storage. A deploy always defaults to demo, even if a key is set, so a hosted app never silently runs real mode.
 
 The original scan is always retained and shown next to the extraction, because the original is the source of truth and the structured data is a convenience layer that can be wrong.
 
@@ -156,7 +159,7 @@ The original scan is always retained and shown next to the extraction, because t
 - **It advises nothing.** Every output is a transcription, an organisation, or a neutral explanation, never a clinical judgment.
 - **The eval scorer is not built yet.** The test suite and the labelled set exist; the one-command accuracy scorer over that set is still to come.
 - **Episode clustering is deterministic and literal.** It groups on exact provider, medicine, and diagnosis-keyword matches within a time window; it will not spot that two differently-named conditions are actually related.
-- **No accounts, database, or multi-user workflow.** It is a focused single-user tool.
+- **Sign-in and per-user isolation are demonstrable, not a hosted service.** Each user has a private store and the demo shows several isolated profiles, but there is no durable multi-tenant database behind it: real personal use is single-user and local. Federated login (OIDC) and durable per-user storage are on the roadmap.
 - **Manual episode edits (merge/split) are not implemented.** Clustering is automatic only.
 
 ## Run it locally
@@ -191,24 +194,26 @@ With a key present the app starts in **real mode** against a private, git-ignore
 Push the repo, then at [share.streamlit.io](https://share.streamlit.io) choose **New app**, pick this repo, the `main` branch, and `src/app.py`.
 
 - **Browse-only demo (no key, zero cost):** deploy as-is. With no key present the app runs read-only over the synthetic records in `demo_cache/`.
-- **Interactive demo (visitors can try their own upload, behind a password):** under the app's **Secrets**, add:
+  Visitors sign in as a seeded demo profile (passwords shown on the login screen) and browse that profile's isolated archive.
+
+- **Interactive demo (a signed-in profile can also try its own upload):** under the app's **Secrets**, add:
 
   ```toml
   APP_MODE = "demo"
   ANTHROPIC_API_KEY = "sk-ant-...  # use a dedicated, spend-capped demo key"
-  DEMO_PASSWORD = "a-password-you-share-deliberately"
   MAX_UPLOADS_PER_SESSION = "3"
   ```
 
-  Uploads are then processed live and kept only in the visitor's session. Use a **spend-capped** key (set a hard limit in the Anthropic console) so a leaked password cannot run up unbounded cost. The deploy stays in demo mode regardless, so the public URL never runs persistent real mode and never touches your real records.
+  Uploads are then processed live and kept only in the visitor's session, never written to shared storage. Use a **spend-capped** key (set a hard limit in the Anthropic console) and the per-session cap so the demo cannot run up unbounded cost. The deploy stays in demo mode regardless, so the public URL never runs persistent real mode and never touches your real records.
 
 ## Roadmap
 
 - The one-command eval scorer over the labelled set (extraction accuracy, explanation fidelity, correct refusal, needs-review correctness)
+- A value-forward UI redesign (lead with the timeline and the doctor-ready export)
 - Manual episode merge and split
+- Federated login (OIDC) and durable per-user storage for true multi-user hosting
 - A short screen-recording walkthrough of the app
-- PDF multi-page and multi-document handling
-- Broader document types (imaging reports, vaccination records)
+- PDF multi-document handling, and broader document types (imaging reports, vaccination records)
 
 ---
 

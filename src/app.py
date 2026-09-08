@@ -7,13 +7,17 @@ medical advice" line, and routes any typed question through the guard first.
 Thin by design: all logic lives in the tested modules (ingest, timeline, search,
 export, store, guard, validate).
 
-Modes:
-  - real  (a key is present locally): uploads are stored under local_records/,
-    private to the machine, and never leave it.
-  - demo  (a deploy, or no key): read-only browsing of the synthetic records in
-    demo_cache/. Uploading can be unlocked with a demo password; those uploads
-    are processed live and kept ONLY in the visitor's session (in memory), never
-    written to the shared store, so one visitor never sees another's upload.
+Identity and modes:
+  - Every user signs in, and each user's records live under their own store root
+    (see store_root), so one user can never see another's records: isolation by
+    construction (src/auth.py owns identity).
+  - real  (a key is present locally): one local account (you). Records are stored
+    privately under local_records/, never leave the machine.
+  - demo  (a deploy, or no key): seeded demo profiles, each owning a synthetic
+    archive under demo_cache/. A reviewer logs in as one profile, then another,
+    and sees only that profile's records. Where a key is configured, a logged-in
+    demo profile can also upload; those uploads are processed live and kept ONLY
+    in the visitor's session (in memory), never written to the shared store.
 
 See PROJECT_SPEC.md sections 5, 8, 10, 15.
 """
@@ -32,12 +36,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st  # noqa: E402
 
-from src import export, guard, ingest, search, timeline, validate  # noqa: E402
-from src.store import DEFAULT_ROOT, Store  # noqa: E402
+from src import auth, export, guard, ingest, search, timeline, validate  # noqa: E402
+from src.store import Store  # noqa: E402
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-_SECRET_KEYS = ("ANTHROPIC_API_KEY", "APP_MODE", "DEMO_PASSWORD", "MAX_UPLOADS_PER_SESSION")
+_SECRET_KEYS = (
+    "ANTHROPIC_API_KEY", "APP_MODE", "MAX_UPLOADS_PER_SESSION",
+    "APP_USER", "APP_USER_NAME", "APP_PASSWORD",
+)
 
 
 # --- config & stores (pure helpers, testable) -------------------------------
@@ -85,20 +92,21 @@ def cfg() -> dict:
         mode = "real" if has_key else "demo"
     return {
         "mode": mode,
-        "demo_password": _secret("DEMO_PASSWORD", ""),
         "max_uploads": int(_secret("MAX_UPLOADS_PER_SESSION", "10") or 10),
         "has_key": has_key,
     }
 
 
-def store_root(mode: str) -> str:
+def store_root(mode: str, user_id: str) -> str:
+    """Per-user store root. Isolation lives here: the user_id picks the folder,
+    and no code path ever reads across users."""
     if mode == "demo":
-        return os.path.join(_REPO, "demo_cache", "store")
-    return DEFAULT_ROOT
+        return os.path.join(_REPO, "demo_cache", "users", user_id, "store")
+    return os.path.join(_REPO, "local_records", "store", "users", user_id)
 
 
-def store_for(mode: str) -> Store:
-    return Store(store_root(mode))
+def store_for(mode: str, user_id: str) -> Store:
+    return Store(store_root(mode, user_id))
 
 
 def export_filename(day: str | None = None) -> str:
@@ -228,23 +236,17 @@ def _run_ingest(up, ingest_fn):
 
 
 def _demo_upload(c: dict) -> None:
-    if not (c["has_key"] and c["demo_password"]):
+    if not c["has_key"]:
         st.info(
-            "Uploading is not enabled in this demo. Browse the sample records from "
-            "the Timeline or Search."
-        )
-        return
-    if not st.session_state.demo_unlocked:
-        st.info(
-            "Uploading is locked. Enter the demo password in the left sidebar to "
-            "enable it for this session."
+            "Uploading is not enabled in this demo deployment. Browse this profile's "
+            "records from the Timeline or Search."
         )
         return
 
     st.caption(
         "Upload a prescription, lab report, or discharge summary. It is processed "
         "live and kept only in this browser session: never saved to the app, and "
-        "not visible to anyone else."
+        "not visible to any other profile or visitor."
     )
     st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
 
@@ -472,40 +474,101 @@ def render_record_detail(store: Store, rec: dict, c: dict) -> None:
 
 # --- entry point ------------------------------------------------------------
 
-def _sidebar_status(c: dict) -> None:
-    """Compact mode card and, in a demo that allows it, the upload-unlock control.
+def _landing(mode: str) -> str:
+    """Where a freshly signed-in user lands. Real mode goes to Upload (add your
+    own); a demo profile lands on its populated Timeline (content to explore)."""
+    return "Upload" if mode == "real" else "Timeline"
 
-    Lives in the sidebar so the main area stays focused on the records. The
-    unlock form is instantiated before the nav radio (see main) so a successful
-    unlock can steer navigation without tripping Streamlit's widget-state guard.
+
+def _reset_session_for(uid: str, mode: str) -> None:
+    """Clear per-user session state on sign-in / sign-out, so nothing from one
+    user's session ever leaks into another's. Safe to set ss.nav here: this only
+    runs before the nav radio is instantiated (see main), then reruns."""
+    ss = st.session_state
+    ss.session_records = []
+    ss.session_originals = {}
+    ss.uploads = 0
+    ss.selected = None
+    ss.active_uid = uid
+    ss.nav = _landing(mode)
+
+
+def _sign_in(user: auth.User, c: dict) -> None:
+    st.session_state.user = user.public()
+    _reset_session_for(user.user_id, c["mode"])
+    st.rerun()
+
+
+def _login(c: dict) -> None:
+    """Render the sign-in gate for the current mode and sign the user in.
+
+    Real mode with no APP_PASSWORD is frictionless (auto sign-in). Demo mode
+    shows the seeded profiles so a reviewer can switch between isolated archives.
     """
+    mode = c["mode"]
+    if mode == "real" and not auth.real_password_required():
+        _sign_in(auth.real_user(), c)
+        return
+
+    st.title("Medical Records Tracker")
+    st.caption("🛈 " + guard.STANDING_NOTICE)
+
+    if mode == "real":
+        st.subheader("Sign in")
+        with st.form("login_real"):
+            pw = st.text_input("Password", type="password")
+            if st.form_submit_button("Sign in", type="primary"):
+                user = auth.authenticate_real(pw)
+                if user:
+                    _sign_in(user, c)
+                else:
+                    st.error("Incorrect password.")
+        return
+
+    # Demo: choose an isolated profile.
+    st.subheader("Choose a demo profile")
+    st.caption(
+        "A portfolio demo of per-user access control: each profile is a separate "
+        "private archive, and one profile never sees another's records."
+    )
+    users = auth.demo_users()
+    if not users:
+        st.error("No demo profiles are configured.")
+        return
+    by_name = {u.name: u for u in users}
+    pick = st.radio("Profile", list(by_name), index=0)
+    with st.form("login_demo"):
+        pw = st.text_input("Password", type="password")
+        st.caption(
+            "Demo passwords (fictional data): "
+            + " · ".join(f"{u.name} = {u.password_hint}" for u in users if u.password_hint)
+        )
+        if st.form_submit_button("Enter", type="primary"):
+            user = auth.authenticate_demo(by_name[pick].user_id, pw)
+            if user:
+                _sign_in(user, c)
+            else:
+                st.error("Incorrect password for that profile.")
+
+
+def _account_card(c: dict) -> None:
+    """Sidebar account card, plus a log-out control where signing out is meaningful."""
+    user = st.session_state.user
     if c["mode"] == "real":
         st.success("**Local mode**")
-        st.caption("Records are saved privately on this machine.")
-        return
-
-    if st.session_state.demo_unlocked:
-        st.success("**Live session**")
+        st.caption(f"Signed in as {user['name']}. Records are saved privately on this machine.")
+    else:
+        st.info(f"**Demo profile: {user['name']}**")
         st.caption(
-            "Uploads enabled. Anything you add stays in this browser session only: "
-            "never saved, never shared."
+            "You are viewing this profile's records only. Nothing here is visible "
+            "to other profiles or visitors."
         )
-        return
-
-    st.info("**Demo**")
-    st.caption("Browsing sample records.")
-    if not (c["has_key"] and c["demo_password"]):
-        return
-    with st.form("unlock_form"):
-        st.caption("Have the demo password? Enable uploads for this session.")
-        pw = st.text_input("Demo password", type="password")
-        if st.form_submit_button("Enable uploads"):
-            if pw == c["demo_password"]:
-                st.session_state.demo_unlocked = True
-                st.session_state.nav = "Upload"  # radio not yet built this run
-                st.rerun()
-            else:
-                st.error("Incorrect password.")
+    # Logging out only means something when there is a gate to return to.
+    if c["mode"] == "demo" or auth.real_password_required():
+        if st.button("Log out"):
+            st.session_state.user = None
+            _reset_session_for("", c["mode"])
+            st.rerun()
 
 
 def main() -> None:
@@ -515,26 +578,31 @@ def main() -> None:
     ss = st.session_state
     ss.setdefault("selected", None)
     ss.setdefault("uploads", 0)
-    ss.setdefault("demo_unlocked", False)
     ss.setdefault("session_records", [])
     ss.setdefault("session_originals", {})
+    ss.setdefault("user", None)
+    ss.setdefault("active_uid", None)
 
     c = cfg()
-    store = store_for(c["mode"])
+
+    # Identity gate: nothing renders until we know who this is.
+    if not ss.user:
+        _login(c)
+        return
+
+    user = ss.user
+    store = store_for(c["mode"], user["id"])
 
     st.title("Medical Records Tracker")
     st.caption("🛈 " + guard.STANDING_NOTICE)
 
     pages = ["Upload", "Timeline", "Search", "Export"]
-    # A locked demo lands on the populated Timeline (content to explore); anywhere
-    # you can add records lands on Upload. Seed the nav value before the radio is
-    # built so it is driven purely by session state (no default-vs-state warning).
-    ss.setdefault("nav", "Timeline" if (c["mode"] == "demo" and not ss.demo_unlocked) else "Upload")
+    ss.setdefault("nav", _landing(c["mode"]))
     with st.sidebar:
         st.markdown("### Medical Records Tracker")
         nav_slot = st.container()          # visual home for the radio (rendered last)
         st.divider()
-        _sidebar_status(c)                 # may set ss.nav then rerun
+        _account_card(c)                   # may set ss.user None then rerun
         with nav_slot:
             page = st.radio("Go to", pages, key="nav")
 

@@ -14,8 +14,14 @@ def test_export_filename():
 
 
 def test_store_root_real_vs_demo():
-    assert app.store_root("real").endswith(os.path.join("local_records", "store"))
-    assert app.store_root("demo").endswith(os.path.join("demo_cache", "store"))
+    assert app.store_root("real", "me").endswith(os.path.join("local_records", "store", "users", "me"))
+    assert app.store_root("demo", "rahul").endswith(os.path.join("demo_cache", "users", "rahul", "store"))
+
+
+def test_store_root_isolates_users():
+    # Two users resolve to different roots; that is the isolation guarantee.
+    assert app.store_root("demo", "rahul") != app.store_root("demo", "ananya")
+    assert app.store_root("real", "me") != app.store_root("real", "someone_else")
 
 
 def test_nz_normalises_blanks():
