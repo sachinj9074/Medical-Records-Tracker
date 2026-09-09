@@ -209,7 +209,6 @@ Push the repo, then at [share.streamlit.io](https://share.streamlit.io) choose *
 ## Roadmap
 
 - A larger, more varied eval set (the scorer exists; grow the labelled data)
-- A value-forward UI redesign (lead with the timeline and the doctor-ready export)
 - Manual episode merge and split
 - Federated login (OIDC) and durable per-user storage for true multi-user hosting
 - A short screen-recording walkthrough of the app

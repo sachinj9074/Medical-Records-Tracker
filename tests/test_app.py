@@ -55,3 +55,32 @@ def test_record_title_prefers_diagnosis():
     assert app._record_title(r) == "2025-01-01 · DRY ECZEMA"
     r2 = {"record_date": "2025-01-01", "document_type": "lab_report", "diagnosis": {"stated_text": None}}
     assert app._record_title(r2) == "2025-01-01 · lab report"
+
+
+def test_doc_icon_maps_types():
+    assert app._doc_icon({"document_type": "prescription"}) == "💊"
+    assert app._doc_icon({"document_type": "lab_report"}) == "🧪"
+    assert app._doc_icon({"document_type": "discharge_summary"}) == "🏥"
+    assert app._doc_icon({"document_type": "weird"}) == "📄"
+
+
+def test_headline_prefers_diagnosis_then_lab_summary():
+    assert app._headline({"diagnosis": {"stated_text": "Acute pharyngitis"}}) == "Acute pharyngitis"
+    lab = {"document_type": "lab_report", "diagnosis": {"stated_text": None},
+           "investigations": [{"name": "HbA1c"}, {"name": "FPG"}, {"name": "TChol"}]}
+    assert app._headline(lab) == "Lab: HbA1c, FPG +1 more"
+    assert app._headline({"document_type": "prescription", "diagnosis": {}}) == "Prescription"
+
+
+def test_overview_counts_and_span():
+    recs = [
+        {"record_date": "2024-01-01", "needs_review": "N"},
+        {"record_date": "2025-06-01", "needs_review": "Y"},
+        {"record_date": None, "needs_review": "N"},
+    ]
+    ov = app._overview(recs)
+    assert ov["records"] == 3
+    assert ov["needs_review"] == 1
+    assert ov["date_from"] == "2024-01-01" and ov["date_to"] == "2025-06-01"
+    empty = app._overview([])
+    assert empty["records"] == 0 and empty["date_from"] is None

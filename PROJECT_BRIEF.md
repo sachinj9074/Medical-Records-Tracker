@@ -391,7 +391,6 @@ conftest.py          # makes `import src` work under pytest
 ## 17. Roadmap
 
 - A larger, more varied labelled eval set (the scorer exists; grow the data and re-baseline).
-- A value-forward UI redesign (lead with the timeline and the doctor-ready export; guided first run).
 - Manual episode merge and split in the UI.
 - Federated login (OIDC) and durable per-user storage for true multi-user hosting; backup/restore and record delete for real personal use.
 - v2 chat retrieval, with the guard inside the chat path (retrieve, never compose).
@@ -399,7 +398,7 @@ conftest.py          # makes `import src` work under pytest
 - PDF multi-document handling; broader document types (imaging reports, vaccination records).
 - Search stemming/synonyms; lab-value trend plots with zero interpretive commentary.
 
-**Done since the initial build:** (1) multi-user access control (sign-in + per-user store isolation, with seeded demo profiles); (2) the one-command eval scorer over the four metrics, with committed baselines in `eval/RESULTS.md`. Both built and tested.
+**Done since the initial build:** (1) multi-user access control (sign-in + per-user store isolation, with seeded demo profiles); (2) the one-command eval scorer over the four metrics, with committed baselines in `eval/RESULTS.md`; (3) the value-forward UI overhaul (timeline home with overview tiles and episode cards, a "messy original vs clean reading" record detail, one-tap review, and a value-led doctor-summary export). All built and tested.
 
 ---
 
