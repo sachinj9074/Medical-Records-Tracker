@@ -137,3 +137,28 @@ def test_filter_by_date_range():
 def test_filter_by_episode():
     recs = [rec("a", episode_id="ep_1"), rec("b", episode_id="ep_2")]
     assert [r["record_id"] for r in export.filter_by_episode(recs, "ep_2")] == ["b"]
+
+
+# --- PDF export -------------------------------------------------------------
+
+def test_pdf_safe_transliterates_nonlatin():
+    assert export._pdf_safe("HbA1c 7.8 µg ≥ 5") == "HbA1c 7.8 ug >= 5"
+    assert export._pdf_safe(None) == ""
+
+
+def test_render_pdf_returns_pdf_bytes():
+    import pytest
+    pytest.importorskip("fpdf")
+    r = rec("a", diagnosis="DRY ECZEMA",
+            meds=[med("Amoxicillin", strength="500 mg", dose="1 tablet", frequency="twice daily")],
+            invs=[inv("HbA1c", value="7.8", unit="%", flag="high")])
+    data = export.render_pdf([r])
+    assert isinstance(data, (bytes, bytearray)) and bytes(data[:5]) == b"%PDF-"
+    assert len(data) > 500
+
+
+def test_render_pdf_empty_records():
+    import pytest
+    pytest.importorskip("fpdf")
+    data = export.render_pdf([])
+    assert bytes(data[:5]) == b"%PDF-"

@@ -178,3 +178,101 @@ def render_summary(records: list, *, patient: str | None = None, title: str | No
             lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+# --- PDF (same facts, laid out for a printable handover) --------------------
+
+_PDF_MAP = {
+    "·": "-", "–": "-", chr(0x2014): "-", "≥": ">=", "≤": "<=", "±": "+/-",
+    "µ": "u", "μ": "u", "→": "->", "’": "'", "‘": "'",
+    "“": '"', "”": '"', "…": "...",
+}
+
+
+def _pdf_safe(s) -> str:
+    """fpdf2's built-in font is latin-1; map the few glyphs medical text can carry,
+    then drop anything still outside latin-1 so a rare symbol never breaks the PDF."""
+    if s is None:
+        return ""
+    text = str(s)
+    for a, b in _PDF_MAP.items():
+        text = text.replace(a, b)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def render_pdf(records: list, *, patient: str | None = None, title: str | None = None) -> bytes:
+    """Render the same facts-only summary as render_summary, as PDF bytes.
+
+    Uses fpdf2 (pure Python, no system binaries). Imported lazily so the rest of
+    the app runs without it installed.
+    """
+    from fpdf import FPDF
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(True, margin=15)
+    pdf.set_margins(15, 15, 15)
+    pdf.add_page()
+
+    def line(text, size=11, style="", h=6, indent=0):
+        pdf.set_font("Helvetica", style, size)
+        pdf.set_x(15 + indent)
+        # Return the cursor to the left margin on the next line, so the following
+        # line has the full page width (fpdf2 otherwise leaves x at the cell's right).
+        pdf.multi_cell(0, h, _pdf_safe(text), new_x="LMARGIN", new_y="NEXT")
+
+    line(title or "Medical records summary", 16, "B", 9)
+    who = patient or _derive_patient(records)
+    if who:
+        line(f"Patient: {who}", 11)
+    dr = _date_range(records)
+    if dr:
+        line(f"Period: {dr}", 11)
+    line(f"Records: {len(records)}", 11)
+    line(f"Generated: {datetime.date.today().isoformat()}", 11)
+    pdf.ln(2)
+    line(
+        f"{guard.STANDING_NOTICE} Digitised from the patient's own documents; the "
+        "original scans are the source of truth. A record tagged unverified was a "
+        "low-confidence read; check it against the original scan.",
+        9, "I", 5,
+    )
+
+    if not records:
+        pdf.ln(2)
+        line("No records to summarise.", 11)
+        return bytes(pdf.output())
+
+    for ep in timeline.build_timeline(records):
+        pdf.ln(3)
+        line(ep.label, 13, "B", 7)
+        for rec in ep.records:
+            _pdf_record(pdf, rec, line)
+    return bytes(pdf.output())
+
+
+def _pdf_record(pdf, rec: dict, line) -> None:
+    date = _val(rec.get("record_date")) or "Undated"
+    dtype = (_val(rec.get("document_type")) or "record").replace("_", " ")
+    caveat = " (unverified extraction)" if rec.get("needs_review") == "Y" else ""
+    pdf.ln(1)
+    line(f"{date} - {dtype}{caveat}", 11, "B", 6)
+
+    prov = rec.get("provider") or {}
+    provline = _join([prov.get("name"), prov.get("specialty"), prov.get("clinic")], " - ")
+    if provline:
+        line(f"Provider: {provline}", 10, indent=4)
+    dx = (rec.get("diagnosis") or {}).get("stated_text")
+    if _val(dx):
+        line(f"Diagnosis (as stated): {dx}", 10, indent=4)
+    if rec.get("medications"):
+        line("Medications:", 10, indent=4)
+        for m in rec["medications"]:
+            line(f"- {_med_line(m)}", 10, indent=8)
+    if rec.get("investigations"):
+        line("Investigations:", 10, indent=4)
+        for i in rec["investigations"]:
+            line(f"- {_inv_line(i)}", 10, indent=8)
+    if _val(rec.get("advice_verbatim")):
+        line(f"Advice (verbatim): {rec['advice_verbatim']}", 10, indent=4)
+    if _val(rec.get("follow_up")):
+        line(f"Follow-up: {rec['follow_up']}", 10, indent=4)

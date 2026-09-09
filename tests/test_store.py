@@ -72,3 +72,16 @@ def test_missing_original_raises(tmp_path):
     s = Store(str(tmp_path))
     with pytest.raises(StoreError):
         s.save(rec(), original_path=str(tmp_path / "does_not_exist.png"))
+
+
+def test_delete_removes_record_and_original(tmp_path):
+    original = tmp_path / "scan.png"
+    original.write_bytes(b"img")
+    s = Store(str(tmp_path / "store"))
+    s.save(rec(), original_path=str(original))
+    assert s.exists("rec_abc123") and s.original_path("rec_abc123") is not None
+
+    assert s.delete("rec_abc123") is True
+    assert not s.exists("rec_abc123")
+    assert s.original_path("rec_abc123") is None
+    assert s.delete("rec_abc123") is False  # idempotent

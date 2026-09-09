@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st  # noqa: E402
 
-from src import auth, export, guard, ingest, search, timeline, validate  # noqa: E402
+from src import auth, backup, export, guard, ingest, search, timeline, validate  # noqa: E402
 from src.store import Store  # noqa: E402
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -501,10 +501,70 @@ def page_export(store: Store, c: dict) -> None:
             selected = export.filter_by_date_range(records, df.isoformat(), dt.isoformat())
 
     md = export.render_summary(selected)
-    st.download_button("⬇  Download summary (.md)", md, file_name=export_filename(),
-                       mime="text/markdown", type="primary")
+    pdf_bytes = _pdf_or_none(selected)
+    d1, d2 = st.columns(2)
+    if pdf_bytes is not None:
+        d1.download_button("⬇  Download PDF", pdf_bytes, file_name=export_filename().replace(".md", ".pdf"),
+                           mime="application/pdf", type="primary")
+    else:
+        d1.caption("PDF export unavailable (install fpdf2).")
+    d2.download_button("⬇  Download Markdown (.md)", md, file_name=export_filename(), mime="text/markdown")
     with st.expander("Preview", expanded=True):
         st.markdown(md)
+
+
+def _pdf_or_none(records: list):
+    """PDF bytes for the summary, or None if PDF rendering is unavailable."""
+    try:
+        return export.render_pdf(records)
+    except Exception:
+        return None
+
+
+# --- data: backup and restore (real mode only) ------------------------------
+
+def page_data(store: Store, c: dict) -> None:
+    st.subheader("🗄  Data and backup")
+
+    st.markdown("**Back up your archive**")
+    st.caption(
+        "Download a complete, portable copy of your records and their original scans. "
+        "Keep it somewhere safe: if this machine is lost, your archive lives on."
+    )
+    pw = st.text_input(
+        "Protect with a passphrase (recommended)", type="password", key="bk_pw",
+        help="Encrypts the backup. You need this exact passphrase to restore it; if you lose it, the backup cannot be opened.",
+    )
+    if st.button("Create backup", type="primary"):
+        try:
+            data = backup.make_backup(store, passphrase=pw or None)
+        except backup.BackupError as e:
+            st.error(str(e))
+        else:
+            ext = "mrtbak" if pw else "zip"
+            st.session_state.backup_blob = (data, f"medical_backup_{datetime.date.today().isoformat()}.{ext}")
+    blob = st.session_state.get("backup_blob")
+    if blob:
+        st.download_button("⬇  Download backup", blob[0], file_name=blob[1],
+                           mime="application/octet-stream")
+        if blob[1].endswith(".mrtbak"):
+            st.caption("Encrypted. Restore needs the same passphrase.")
+
+    st.divider()
+    st.markdown("**Restore from a backup**")
+    st.caption("Merges into this archive: existing records are kept, matching ids updated, nothing deleted.")
+    up = st.file_uploader("Backup file", type=["zip", "mrtbak"], key="restore_up")
+    rpw = st.text_input("Passphrase (only if the backup is encrypted)", type="password", key="rs_pw")
+    if up is not None and st.button("Restore from this backup"):
+        try:
+            res = backup.restore_backup(store, up.getvalue(), passphrase=rpw or None)
+            timeline.recluster(store)
+        except backup.BackupError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Could not restore: {e}")
+        else:
+            st.success(f"Restored: {res['added']} added, {res['updated']} updated.")
 
 
 # --- record detail + review -------------------------------------------------
@@ -590,19 +650,28 @@ def _edit_form(store: Store, rec: dict) -> None:
         st.rerun()
 
 
+def _show_image(src) -> None:
+    """Render an image, degrading to a note if the bytes/file cannot be decoded,
+    so one unreadable original never breaks the whole record view."""
+    try:
+        st.image(src, use_container_width=True)
+    except Exception:
+        st.info("The original scan is on file but could not be displayed here.")
+
+
 def _original_panel(store: Store, rec: dict, is_session: bool) -> None:
     rid = rec["record_id"]
     st.markdown("**The original** (the source of truth)")
     if is_session:
         data, name = st.session_state.session_originals[rid]
         if os.path.splitext(name)[1].lower() in _IMAGE_EXTS:
-            st.image(data, use_container_width=True)
+            _show_image(data)
         else:
             st.info(f"Original on file: {name}")
         return
     op = store.original_path(rid)
     if op and os.path.splitext(op)[1].lower() in _IMAGE_EXTS:
-        st.image(op, use_container_width=True)
+        _show_image(op)
     elif op:
         st.info(f"Original on file: {os.path.basename(op)}")
     else:
@@ -660,6 +729,38 @@ def render_record_detail(store: Store, rec: dict, c: dict) -> None:
             if st.button("Edit fields"):
                 st.session_state.editing = rid
                 st.rerun()
+
+    # Delete: your own records only (a stored real record, or a session upload).
+    # Seeded demo records are fixtures and cannot be deleted.
+    if editable or is_session:
+        _delete_control(store, rid, is_session)
+
+
+def _delete_control(store: Store, rid: str, is_session: bool) -> None:
+    with st.expander("Delete this record"):
+        st.caption("Removes the record and its stored original. This cannot be undone.")
+        if st.session_state.get("confirm_delete") != rid:
+            if st.button("Delete this record", key="del_" + rid):
+                st.session_state.confirm_delete = rid
+                st.rerun()
+            return
+        st.warning("Delete this record permanently?")
+        yes, no = st.columns(2)
+        if yes.button("Yes, delete", type="primary", key="delok_" + rid):
+            if is_session:
+                st.session_state.session_records = [
+                    r for r in st.session_state.session_records if r.get("record_id") != rid
+                ]
+                st.session_state.session_originals.pop(rid, None)
+            else:
+                store.delete(rid)
+                timeline.recluster(store)
+            st.session_state.confirm_delete = None
+            st.session_state.selected = None
+            st.rerun()
+        if no.button("Cancel", key="delcancel_" + rid):
+            st.session_state.confirm_delete = None
+            st.rerun()
 
 
 # --- entry point ------------------------------------------------------------
@@ -738,9 +839,12 @@ def _login(c: dict) -> None:
 
 
 def _sidebar(c: dict) -> None:
+    items = list(NAV)
+    if c["mode"] == "real":   # backup/restore is a personal-use, real-mode feature
+        items = items + [("Data", "🗄  Data")]
     with st.sidebar:
         st.markdown("### 🩺 Medical Records Tracker")
-        for key, label in NAV:
+        for key, label in items:
             active = st.session_state.nav == key
             if st.button(label, key="nav_" + key, use_container_width=True,
                          type="primary" if active else "secondary"):
@@ -779,6 +883,7 @@ def main() -> None:
     ss = st.session_state
     ss.setdefault("selected", None)
     ss.setdefault("editing", None)
+    ss.setdefault("confirm_delete", None)
     ss.setdefault("uploads", 0)
     ss.setdefault("session_records", [])
     ss.setdefault("session_originals", {})
@@ -813,6 +918,8 @@ def main() -> None:
         page_search(store, c)
     elif page == "Export":
         page_export(store, c)
+    elif page == "Data" and c["mode"] == "real":
+        page_data(store, c)
     else:
         page_timeline(store, c)
 

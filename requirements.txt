@@ -10,5 +10,9 @@ python-dotenv>=1.0
 pillow>=10.4
 pymupdf>=1.24        # render PDF pages to images for vision extraction
 
+# Export and backup
+fpdf2>=2.7           # pure-Python PDF export of the doctor summary
+cryptography>=42.0   # optional passphrase encryption for backups (AES-GCM)
+
 # Tests
 pytest>=8.3

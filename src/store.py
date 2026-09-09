@@ -84,6 +84,18 @@ class Store:
         matches = sorted(glob.glob(os.path.join(self.originals_dir, f"{record_id}.*")))
         return matches[0] if matches else None
 
+    def delete(self, record_id: str) -> bool:
+        """Remove a record and its retained original(s). Returns True if a record
+        file was removed. Idempotent: missing files are ignored."""
+        removed = False
+        rp = self._record_path(record_id)
+        if os.path.exists(rp):
+            os.remove(rp)
+            removed = True
+        for op in glob.glob(os.path.join(self.originals_dir, f"{record_id}.*")):
+            os.remove(op)
+        return removed
+
     # --- internals ---------------------------------------------------------
 
     def _retain_original(self, record_id: str, original_path: str) -> None:

@@ -209,8 +209,12 @@ Design is **author → guard → gate**:
 - **No synonyms or stemming:** "hba1c" finds the lab, but "diabetes" does not unless that literal word is present. Search can only find what extraction captured. Stemming and synonyms are a later enhancement.
 
 ### `export.py` (doctor-ready summary)
-- `render_summary(records, ...)` produces facts-only Markdown, grouped by episode (newest first), records oldest-first within. A header carries patient, period, generated date, and the standing notice.
+- `render_summary(records, ...)` produces facts-only Markdown, grouped by episode (newest first), records oldest-first within. A header carries patient, period, generated date, and the standing notice. `render_pdf(records, ...)` lays out the same facts as a PDF via `fpdf2` (a `_pdf_safe` sanitiser transliterates the few non-latin glyphs medical text can carry).
 - **Printed lab flags are shown exactly as stored** (for example `[HIGH]`); an `unknown` flag is suppressed. **Plain-language notes are deliberately omitted from the doctor export** (a doctor wants the facts, not the lay glosses). A `needs_review == Y` record is marked "(unverified extraction)". Helpers `filter_by_date_range` and `filter_by_episode` scope the export.
+
+### `backup.py` (portable backup and restore, deterministic, no model)
+- `make_backup(store, passphrase=None)` builds a self-contained ZIP (every record JSON + its retained original + a manifest); with a passphrase it is encrypted (scrypt KDF via stdlib, AES-GCM via `cryptography`, `cryptography` imported lazily so plain backups need no dependency).
+- `restore_backup(store, data, passphrase=None)` **merges by `record_id`** (upsert; nothing deleted), extracting only validated members (no absolute paths, no `..` traversal), so a malformed or hostile archive cannot write outside the store. `Store.delete(record_id)` removes a record and its original.
 
 ### `auth.py` (identity and per-user isolation, deterministic, no model)
 - Decides who a request belongs to. The safety property is **isolation by construction**: a `user_id` picks a store root (see `app.store_root`) and no code path enumerates across users, so one user can never see another's records.
@@ -222,7 +226,7 @@ Design is **author → guard → gate**:
 - **Identity gate.** Nothing renders until the user signs in (`_login`). Real mode auto-signs-in as the single local account unless `APP_PASSWORD` is set; demo mode shows the seeded profiles so a reviewer can log in as one, then another, and see the isolation. Signing in resets per-user session state (`_reset_session_for`), so one profile's session uploads never leak into another's.
 - **Per-user store.** `store_root(mode, user_id)` resolves each user to their own folder: `local_records/store/users/<id>` (real) or `demo_cache/users/<id>/store` (demo). Every data path (`all_records`, `find_record`, timeline, search, export, save) operates only on the signed-in user's store plus that user's session uploads.
 - **Modes.** *Real mode* (a key present locally): uploads stored privately under `local_records/`. *Demo mode* (a deploy, or no key, or `APP_MODE=demo`): browsing the signed-in profile's synthetic archive under `demo_cache/`; where a key is configured, that profile can also upload, kept **only in the visitor's browser session** (never written to shared storage). A deploy always defaults to demo even if a key is set, so a hosted app never silently runs real mode.
-- Sidebar shows an account card (mode + who is signed in + a log-out control where sign-out is meaningful). A demo profile lands on its populated timeline. Every record view shows the original scan next to the extraction and the standing notice. Editing (correct fields, mark reviewed) is offered only for stored records, never for a session-only demo upload.
+- Sidebar shows labelled icon nav (a real-mode-only **Data** page adds backup/restore) plus an account card (mode + who is signed in + a log-out control where sign-out is meaningful). A demo profile lands on its populated timeline. The value-forward record detail shows the original scan beside the reading; **one-tap review** ("Looks right, mark reviewed" vs "Correct fields") and **delete** (with a confirm step) are offered only for your own records, never for a seeded demo record.
 
 ---
 
@@ -234,7 +238,7 @@ Testing on real handwritten prescriptions surfaced a specific, repeatable failur
 
 ## 10. Evals and testing
 
-**Test suite (built, passing): 132 tests via `pytest`.** They cover every part where consistency matters and the model is not involved: schema validation and the `needs_review` signals, the guard's refuse/allow categories, the explanation fidelity guard (that it never introduces a number or a directive), storage round-trips, the full ingest chain (including the escalation branch and graceful degradation), episode clustering, guarded search, the export format, the sign-in and per-user store isolation (password hashing, authenticate success/failure, and that two users resolve to different roots), and the eval scorer's own comparison logic.
+**Test suite (built, passing): 144 tests via `pytest`.** They cover every part where consistency matters and the model is not involved: schema validation and the `needs_review` signals, the guard's refuse/allow categories, the explanation fidelity guard (that it never introduces a number or a directive), storage round-trips (including delete), the full ingest chain (including the escalation branch and graceful degradation), episode clustering, guarded search, the export format (Markdown and PDF), the backup pack/unpack and encrypt/decrypt round-trips (including zip-slip rejection and wrong-passphrase failure), the sign-in and per-user store isolation, and the eval scorer's own comparison logic.
 
 **Real-document testing** against actual handwritten prescriptions is what produced the escalation finding in section 9.
 
@@ -299,6 +303,7 @@ Note the printed `[HIGH]` flags are carried through exactly as the report printe
 - **Local only (never committed, gitignored):** your real records and their originals under `local_records/`. They never leave your machine and are never uploaded to the hosted demo.
 - **On the hosted demo:** uploads are processed live and kept only in the visitor's browser session (via `ingest_ephemeral`), never written to shared storage, so one visitor can never see another's document. `.streamlit/secrets.toml` is gitignored.
 - **Per-user isolation:** every signed-in user reads and writes only their own store root (`.../users/<id>/...`); no code path enumerates across users. Demo profile passwords live only as PBKDF2 hashes in `config/demo_users.json`.
+- **Backups are a manual, local download** (real mode), never synced anywhere automatically. They can be passphrase-encrypted (AES-GCM), so a backup that ends up in a cloud drive stays protected; lose the passphrase and that backup cannot be opened.
 
 ---
 
@@ -330,8 +335,9 @@ With a key present the app starts in **real mode** and signs you in as the singl
 - **Anthropic Claude** via the official SDK, tiered: `claude-sonnet-5` (fast, everyday reading) and `claude-opus-4-8` (judgment: hard vision + the plain-language explanations).
 - **jsonschema** (Draft 2020-12): the record shape is schema-defined and every extraction is validated.
 - **Pillow** and **PyMuPDF**: image handling and rendering PDF pages to images for the vision model.
-- **hashlib / hmac** (stdlib): PBKDF2 password hashing for sign-in and per-user isolation.
-- **python-dotenv** (load the key locally), **pytest** (the 132-test suite).
+- **fpdf2** (pure-Python PDF export of the doctor summary) and **cryptography** (optional passphrase-encrypted backups, AES-GCM).
+- **hashlib / hmac** (stdlib): PBKDF2 password hashing for sign-in and per-user isolation, and scrypt for backup encryption.
+- **python-dotenv** (load the key locally), **pytest** (the 144-test suite).
 
 ---
 
@@ -356,10 +362,11 @@ src/
   validate.py        # schema + needs_review + should_escalate (deterministic)
   guard.py           # medical-advice refusal guard (deterministic)
   ingest.py          # the orchestrator (chains the pipeline; ephemeral variant)
-  store.py           # local record + original persistence (gitignored root)
+  store.py           # local record + original persistence, incl. delete (gitignored root)
   timeline.py        # episode clustering + timeline (union-find, deterministic)
   search.py          # guarded keyword/field search (deterministic)
-  export.py          # doctor-ready Markdown summary
+  export.py          # doctor-ready summary, Markdown and PDF
+  backup.py          # portable backup/restore of a store (optional encryption)
 eval/
   eval_set/          # labelled synthetic samples (ground truth)
   run_eval.py        # the eval scorer (CLI: --metric / --samples / --strict)
@@ -370,7 +377,7 @@ eval/
 samples/             # fictional prescriptions and reports (committed)
 demo_cache/users/<id>/store/   # per-profile synthetic records + originals (committed)
 local_records/store/users/<id>/  # real records + originals (gitignored, never committed)
-tests/               # 132 tests (pytest)
+tests/               # 144 tests (pytest)
 conftest.py          # makes `import src` work under pytest
 .claude/launch.json  # dev-server config (streamlit, port 8520)
 ```
@@ -392,13 +399,13 @@ conftest.py          # makes `import src` work under pytest
 
 - A larger, more varied labelled eval set (the scorer exists; grow the data and re-baseline).
 - Manual episode merge and split in the UI.
-- Federated login (OIDC) and durable per-user storage for true multi-user hosting; backup/restore and record delete for real personal use.
+- Federated login (OIDC) and durable per-user storage for true multi-user hosting.
 - v2 chat retrieval, with the guard inside the chat path (retrieve, never compose).
 - A short screen-recording walkthrough and screenshots in the README.
 - PDF multi-document handling; broader document types (imaging reports, vaccination records).
 - Search stemming/synonyms; lab-value trend plots with zero interpretive commentary.
 
-**Done since the initial build:** (1) multi-user access control (sign-in + per-user store isolation, with seeded demo profiles); (2) the one-command eval scorer over the four metrics, with committed baselines in `eval/RESULTS.md`; (3) the value-forward UI overhaul (timeline home with overview tiles and episode cards, a "messy original vs clean reading" record detail, one-tap review, and a value-led doctor-summary export). All built and tested.
+**Done since the initial build:** (1) multi-user access control (sign-in + per-user store isolation, with seeded demo profiles); (2) the one-command eval scorer over the four metrics, with committed baselines in `eval/RESULTS.md`; (3) the value-forward UI overhaul (timeline home with overview tiles and episode cards, a "messy original vs clean reading" record detail, one-tap review, and a value-led doctor-summary export); (4) real-use enablers (portable backup/restore with optional passphrase encryption on a real-mode "Data" page, record delete with a confirm step, and PDF export of the doctor summary). All built and tested.
 
 ---
 

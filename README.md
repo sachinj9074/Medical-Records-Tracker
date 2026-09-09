@@ -133,6 +133,7 @@ Note that the printed `[HIGH]` flags are carried through exactly as the report p
 - **Anthropic Claude** (official SDK), tiered on cost and difficulty: a fast model (`claude-sonnet-5`) for everyday reading, a stronger model (`claude-opus-4-8`) for hard vision and for the plain-language explanations
 - **jsonschema** (Draft 2020-12): the record shape is schema-defined and every extraction is validated against it
 - **Pillow** and **PyMuPDF** for image handling and rendering PDF pages to images for the vision model
+- **fpdf2** for the PDF version of the doctor-ready summary; **cryptography** for optional passphrase-encrypted backups
 - **python-dotenv** for loading `ANTHROPIC_API_KEY` from a local `.env` during development
 - **hashlib / hmac** (stdlib) for the sign-in (PBKDF2 password hashing) and per-user isolation
 - **pytest** for the test suite
@@ -141,7 +142,7 @@ Note that the printed `[HIGH]` flags are carried through exactly as the report p
 
 Testing is built into the design, at three levels:
 
-- **An automated suite of 132 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips, the full ingest chain, episode clustering, guarded search, the export format, the sign-in and per-user isolation, and the eval scorer's own logic.
+- **An automated suite of 144 tests** (`pytest`) covers the parts where consistency matters and the model is not involved: schema validation and the `needs review` signals, the refusal guard's categories, the explanation fidelity guard (that it never introduces a number or an instruction), storage round-trips (including delete), the full ingest chain, episode clustering, guarded search, the export format (Markdown and PDF), the backup pack/unpack and encrypt/decrypt round-trips, the sign-in and per-user isolation, and the eval scorer's own logic.
 - **Real-document testing** against actual handwritten prescriptions is what shaped the pipeline. It surfaced the fast tier's invented-dosing failure (see design decision 2), which the fast→judgment escalation now handles. That finding is the reason escalation exists.
 - **A one-command eval scorer** (`python eval/run_eval.py`) runs the real pipeline over a labelled synthetic set and reports the four metrics. Latest run: **extraction 97%, explanation fidelity 93%, correct refusal 100%, needs-review 75%** (see [eval/RESULTS.md](eval/RESULTS.md)). Fidelity uses an independent judge, deliberately stricter than the in-pipeline guard; the one residual flag is a diagnosis note that restated the patient's body site, and the needs-review miss is escalation correctly clearing a handwritten read the label assumed would be flagged. The scorer is a measurement tool (baselines over synthetic data), with a `--strict` mode as a CI gate on the safety metrics.
 
