@@ -73,10 +73,19 @@ This is your `ANTHROPIC_API_KEY`. Skip this part only for the zero-cost showcase
    R2_ACCESS_KEY_ID    = "..."
    R2_SECRET_ACCESS_KEY = "..."
 
+   # invite code for "Use it for real": only people you give it to can reach
+   # sign-in or account creation. Strongly recommended on a public deploy.
+   REAL_ACCESS_CODE    = "pick-a-shared-code"
+
    # optional, these are the defaults
    DEMO_LIVE_UPLOADS   = "2"    # live "try your own file" trials per demo session
    REAL_UPLOADS_PER_DAY = "25"  # documents a real account may read per day
    ```
+
+   Leave `REAL_ACCESS_CODE` blank (or unset) only if you want anyone to be able
+   to create a real account. With it set, share the code with your invitees; each
+   of them still creates their own password-protected account. Rotate it any time
+   by changing this value (everyone re-enters the new code once).
 
 4. Save. Streamlit reboots the app with the new secrets.
 

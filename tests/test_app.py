@@ -60,6 +60,13 @@ def test_cfg_demo_live_cap_default_and_override(monkeypatch):
     assert app.cfg()["demo_live_cap"] == 0
 
 
+def test_cfg_real_access_code(monkeypatch):
+    monkeypatch.delenv("REAL_ACCESS_CODE", raising=False)
+    assert app.cfg()["real_access_code"] == ""     # blank = no gate
+    monkeypatch.setenv("REAL_ACCESS_CODE", "let-me-in")
+    assert app.cfg()["real_access_code"] == "let-me-in"
+
+
 def test_demo_samples_load_prebaked_runs():
     # Pre-baked runs let the demo show extraction with no API call.
     samples = app._demo_samples()

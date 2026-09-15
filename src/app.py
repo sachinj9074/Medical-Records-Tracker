@@ -24,6 +24,7 @@ enumerates across users. See PROJECT_SPEC.md sections 5, 8, 10, 15.
 from __future__ import annotations
 
 import datetime
+import hmac
 import html
 import json
 import os
@@ -45,7 +46,7 @@ from src.store import Store  # noqa: E402
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _SECRET_KEYS = (
-    "ANTHROPIC_API_KEY", "DEMO_LIVE_UPLOADS", "REAL_UPLOADS_PER_DAY",
+    "ANTHROPIC_API_KEY", "DEMO_LIVE_UPLOADS", "REAL_UPLOADS_PER_DAY", "REAL_ACCESS_CODE",
     "R2_BUCKET", "R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 )
 
@@ -111,6 +112,8 @@ def cfg() -> dict:
         "has_key": has_key,
         "demo_live_cap": int(_secret("DEMO_LIVE_UPLOADS", "2") or 2),
         "real_cap": int(_secret("REAL_UPLOADS_PER_DAY", "25") or 25),
+        # Shared invite code gating the whole real section. Blank = no gate.
+        "real_access_code": _secret("REAL_ACCESS_CODE", ""),
         "storage": "r2" if bucket else "local",
         "r2": {
             "bucket": bucket,
@@ -946,8 +949,26 @@ def _demo_login(c: dict) -> None:
                 st.error("Incorrect password for that profile.")
 
 
+def _real_access_gate(code: str) -> None:
+    """A shared invite code gating the whole real section, so only people you give
+    the code to can reach sign-in or account creation (and spend the API budget)."""
+    st.caption("This area is invite-only. Enter the access code you were given.")
+    with st.form("real_gate"):
+        entered = st.text_input("Access code", type="password")
+        if st.form_submit_button("Continue", type="primary"):
+            if hmac.compare_digest(entered or "", code):
+                st.session_state.real_unlocked = True
+                st.rerun()
+            else:
+                st.error("Incorrect access code.")
+
+
 def _real_login(c: dict) -> None:
     st.subheader("Use it for real")
+    code = c["real_access_code"]
+    if code and not st.session_state.get("real_unlocked"):
+        _real_access_gate(code)
+        return
     if _hosted() and c["storage"] != "r2":
         st.info(
             "Durable cloud storage is not configured on this deployment, so real "
@@ -1021,6 +1042,7 @@ def _account_card(c: dict) -> None:
         st.session_state.user = None
         st.session_state.user_key = None
         st.session_state.mode = None
+        st.session_state.real_unlocked = False   # re-enter the invite code next time
         _reset_session_for("")
         st.rerun()
 
@@ -1040,6 +1062,7 @@ def main() -> None:
     ss.setdefault("user", None)
     ss.setdefault("user_key", None)   # a real user's data key: session memory only
     ss.setdefault("mode", None)       # landing choice, before sign-in
+    ss.setdefault("real_unlocked", False)   # shared invite code passed this session
     ss.setdefault("active_uid", None)
     ss.setdefault("nav", "Timeline")
 
