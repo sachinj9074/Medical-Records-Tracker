@@ -608,11 +608,10 @@ def _pdf_or_none(records: list):
         return None
 
 
-# --- data: backup and restore -----------------------------------------------
-# Temporarily unlinked from the nav: backup.py reaches into store.records_dir,
-# which an encrypted (cloud or local) store does not expose. Re-enabling it means
-# rebuilding backup over Store's public API (list + original_bytes); tracked as a
-# follow-up. Kept here, still covered by test_backup.py against a local store.
+# --- data: backup and restore (real mode) -----------------------------------
+# Works for any backend: backup.py reads through the Store's public API, so an
+# encrypted store is decrypted into a portable ZIP (protect the file with a
+# passphrase), and restore re-encrypts on the way back in.
 
 def page_data(store: Store, c: dict) -> None:
     st.subheader("🗄  Data and backup")
@@ -989,9 +988,12 @@ def _real_login(c: dict) -> None:
 
 
 def _sidebar(c: dict) -> None:
+    items = list(NAV)
+    if c["mode"] == "real":   # backup/restore is a personal-use, real-mode feature
+        items = items + [("Data", "🗄  Data")]
     with st.sidebar:
         st.markdown("### 🩺 Medical Records Tracker")
-        for key, label in NAV:
+        for key, label in items:
             active = st.session_state.nav == key
             if st.button(label, key="nav_" + key, use_container_width=True,
                          type="primary" if active else "secondary"):
@@ -1076,6 +1078,8 @@ def main() -> None:
         page_search(store, c)
     elif page == "Export":
         page_export(store, c)
+    elif page == "Data" and c["mode"] == "real":
+        page_data(store, c)
     else:
         page_timeline(store, c)
 

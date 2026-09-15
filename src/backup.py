@@ -36,18 +36,25 @@ class BackupError(RuntimeError):
 # --- pack -------------------------------------------------------------------
 
 def make_backup(store, *, passphrase: str | None = None) -> bytes:
-    """Build a backup of everything in `store`. Encrypt it if a passphrase is given."""
+    """Build a backup of everything in `store`. Encrypt it if a passphrase is given.
+
+    Reads through the Store's public API (list + original_bytes), so it works for
+    any backend: an encrypted store is decrypted on the way in, and the ZIP holds
+    plaintext records and originals. Protect the file itself with a passphrase.
+    """
     buf = io.BytesIO()
     n = 0
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for fn in sorted(os.listdir(store.records_dir)):
-            if fn.endswith(".json"):
-                z.write(os.path.join(store.records_dir, fn), f"records/{fn}")
-                n += 1
-        for fn in sorted(os.listdir(store.originals_dir)):
-            p = os.path.join(store.originals_dir, fn)
-            if os.path.isfile(p):
-                z.write(p, f"originals/{fn}")
+        for rec in store.list():
+            rid = rec.get("record_id")
+            if not rid:
+                continue
+            z.writestr(f"records/{rid}.json", json.dumps(rec, indent=2, ensure_ascii=False))
+            n += 1
+            got = store.original_bytes(rid)
+            if got:
+                data, ext = got
+                z.writestr(f"originals/{rid}{ext}", data)
         manifest = {
             "app": "medical-records-tracker", "backup_version": 1,
             "created": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -108,11 +115,11 @@ def restore_backup(store, data: bytes, *, passphrase: str | None = None) -> dict
 
     for name in names:
         if name.startswith("originals/"):
-            base = os.path.basename(name)
-            if not base:
+            base = os.path.basename(name)   # "<record_id><ext>"
+            rid, ext = os.path.splitext(base)
+            if not rid:
                 continue
-            with open(os.path.join(store.originals_dir, base), "wb") as f:
-                f.write(zf.read(name))
+            store.save_original(rid, zf.read(name), ext)
 
     return {"added": added, "updated": updated, "records": added + updated}
 

@@ -123,6 +123,16 @@ class Store:
             return None
         return self._decode(self.backend.get(key)), os.path.splitext(key)[1].lower()
 
+    def save_original(self, record_id: str, data: bytes, ext: str) -> None:
+        """Store an original's raw bytes directly (encrypting when a cipher is set).
+
+        Used on restore, where the bytes come from a backup rather than a file on
+        disk. Complements _retain_original, which copies from a path."""
+        ext = ext.lower()
+        if ext and not ext.startswith("."):
+            ext = "." + ext
+        self.backend.put(f"originals/{record_id}{ext}", self._encode(data))
+
     def original_path(self, record_id: str) -> str | None:
         """A real filesystem path to the original, for a local unencrypted store
         only (where the bytes on disk are the original itself). None otherwise:
