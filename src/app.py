@@ -539,6 +539,8 @@ def page_search(store: Store, c: dict) -> None:
         st.info(resp.message)
         return
     st.caption(f"{len(resp.hits)} match(es)")
+    if getattr(resp, "expansions", None):
+        st.caption("Also searched related terms: " + ", ".join(resp.expansions))
     for h in resp.hits:
         r = h.record
         with st.container(border=True):

@@ -134,3 +134,54 @@ def test_date_range_filter():
     ]
     resp = search.search("metformin", records, date_from="2025-01-01", date_to="2025-12-31")
     assert ids(resp) == ["y2025"]
+
+
+# --- curated synonyms -------------------------------------------------------
+
+DIABETES = [["diabetes", "diabetic", "dm", "blood sugar", "sugar", "hba1c", "fasting glucose", "glucose"]]
+
+
+def test_synonym_finds_clinical_record_from_lay_term():
+    # "diabetes" appears literally in neither record, but the concept does.
+    resp = search.search("diabetes", corpus(), synonyms=DIABETES)
+    assert resp.status == "ok"
+    got = set(ids(resp))
+    assert "rec_lab" in got     # matched via HbA1c / "blood sugar" in the plain note
+    assert "rec_diab" in got    # matched via "DM"
+    assert "rec_eczema" not in got and "rec_amox" not in got
+    assert "hba1c" in resp.expansions    # the related terms that matched are reported
+
+
+def test_synonym_multiword_term_needs_all_its_tokens():
+    # "blood sugar" should match the lab (plain note has both words), not a record
+    # that merely contains "blood" somewhere.
+    only_blood = [rec("bloodonly", diagnosis="blood in urine")]
+    resp = search.search("diabetes", only_blood, synonyms=DIABETES)
+    assert resp.status == "no_match"
+
+
+def test_synonym_expansion_still_refuses_judgment():
+    # The guard runs first: a judgment question is refused even with synonym terms.
+    resp = search.search("is my diabetes dangerous?", corpus(), synonyms=DIABETES)
+    assert resp.status == "refused"
+
+
+def test_partial_word_does_not_activate_a_concept():
+    # "diabet" is not an exact term, so it must not pull in the diabetes concept;
+    # it still substring-matches "Diabetology" directly.
+    resp = search.search("diabet", corpus(), synonyms=DIABETES)
+    assert ids(resp) == ["rec_diab"]
+    assert resp.expansions == []
+
+
+def test_non_synonym_query_unaffected():
+    resp = search.search("eczema", corpus(), synonyms=DIABETES)
+    assert ids(resp) == ["rec_eczema"]
+    assert resp.expansions == []
+
+
+def test_committed_synonyms_file_loads_and_expands():
+    groups = search.load_synonyms()
+    assert any("hba1c" in [t.lower() for t in g] for g in groups)   # diabetes concept present
+    resp = search.search("diabetes", corpus())      # uses the real committed map
+    assert resp.status == "ok" and "rec_lab" in set(ids(resp))

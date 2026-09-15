@@ -1,0 +1,12 @@
+{
+  "note": "Curated retrieval synonyms: each group is a set of interchangeable search terms linking a lay word to its clinical term or measure, so a plain-language search still finds the clinical record (for example 'diabetes' finding an HbA1c lab). Human-reviewed, never model-generated. These broaden retrieval only; they are never a medical claim, and a wrong entry can at worst surface an unrelated record, never fabricate a fact. Kept conservative: well-established condition, test, and lay-term pairs, no specific drug names. A search only expands when a whole query word exactly matches a term here.",
+  "groups": [
+    ["diabetes", "diabetic", "dm", "blood sugar", "sugar", "hba1c", "glycated haemoglobin", "glycated hemoglobin", "fasting glucose", "glucose"],
+    ["thyroid", "hypothyroid", "hypothyroidism", "hyperthyroid", "hyperthyroidism", "tsh", "thyroxine", "t4", "t3"],
+    ["cholesterol", "lipid", "lipids", "ldl", "hdl", "triglycerides", "triglyceride"],
+    ["kidney", "renal", "creatinine", "egfr", "urea"],
+    ["blood pressure", "bp", "hypertension", "hypertensive"],
+    ["liver", "hepatic", "sgpt", "sgot", "alt", "ast", "bilirubin"],
+    ["anaemia", "anemia", "haemoglobin", "hemoglobin", "hb"]
+  ]
+}

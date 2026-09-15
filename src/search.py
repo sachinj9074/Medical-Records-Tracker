@@ -8,11 +8,15 @@ any search runs, while a retrieval query ("show my diabetes records") proceeds.
 When nothing matches, the answer is the honest NO_MATCH_MESSAGE, never general
 medical knowledge (section 10).
 
-Matching is literal: noise words are stripped from the query, and every
-remaining content token must appear (substring either way) somewhere in a
-record's clinical fields. There is no synonym or concept expansion, so "hba1c"
-finds the lab but "diabetes" does not; and search can only find what extraction
-captured. Stemming and synonyms are a later enhancement.
+Matching is literal per token: noise words are stripped from the query, and
+every remaining content concept must appear (substring either way) somewhere in
+a record's clinical fields. A concept is the query word plus any curated synonyms
+for it (config/synonyms.json), so a lay word finds its clinical record: "diabetes"
+also matches an HbA1c lab. The synonym map is human-reviewed and committed, never
+model-generated; it broadens retrieval only and is never a medical claim. A wrong
+entry can at worst surface an unrelated record, never fabricate a fact. Which
+related terms actually matched is reported back (SearchResponse.expansions) so the
+behaviour is legible. Search can still only find what extraction captured.
 
 See PROJECT_SPEC.md sections 4, 5, 6, 10.
 """
@@ -20,10 +24,16 @@ See PROJECT_SPEC.md sections 4, 5, 6, 10.
 from __future__ import annotations
 
 import datetime
+import functools
+import json
+import os
 import re
 from dataclasses import dataclass, field
 
 from src import guard
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SYNONYMS_PATH = os.path.join(_REPO, "config", "synonyms.json")
 
 # Grammatical filler and generic verbs that carry no record content. Stripped
 # from the query so natural phrasing ("show my diabetes records") reduces to its
@@ -55,6 +65,56 @@ class SearchResponse:
     query: str
     hits: list = field(default_factory=list)
     message: str | None = None
+    expansions: list = field(default_factory=list)  # synonym terms that produced a hit
+
+
+# --- curated synonyms -------------------------------------------------------
+
+def load_synonyms(path: str = SYNONYMS_PATH) -> list:
+    """Load the curated synonym groups (list of lists of terms). Empty if missing."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    groups = data.get("groups") if isinstance(data, dict) else data
+    if not isinstance(groups, list):
+        return []
+    out = []
+    for g in groups:
+        if isinstance(g, list):
+            terms = [str(t).strip() for t in g if str(t).strip()]
+            if terms:
+                out.append(terms)
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def _default_synonyms() -> tuple:
+    # Cached and hashable (a tuple of tuples) so it is loaded once per process.
+    return tuple(tuple(g) for g in load_synonyms())
+
+
+def _concept_terms(qtoken: str, groups) -> list:
+    """The other terms of every group the query word *exactly* belongs to.
+
+    Activation is exact (the whole query word equals one of a term's tokens), so a
+    partial word like "diabet" does not pull in a concept; but once activated, the
+    concept's terms are matched against records with the usual substring rules.
+    """
+    out = []
+    for g in groups:
+        term_toks = [(_tokens(t), t) for t in g]
+        if any(qtoken in toks for toks, _ in term_toks):
+            for toks, term in term_toks:
+                if toks and toks != [qtoken]:
+                    out.append(term)
+    seen, res = set(), []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            res.append(t)
+    return res
 
 
 def _tokens(text) -> list:
@@ -122,23 +182,49 @@ def _token_matches(q: str, field_tokens: list) -> bool:
     return False
 
 
-def _match_record(query_tokens: list, record: dict):
-    """AND across query tokens. Returns (score, matched_fields) or None."""
+def _best_term_match(term_tokens: list, fields: list):
+    """(best field weight, matched labels) if every token of a term matches some
+    field, else (None, empty). A multi-word term (for example "blood sugar") needs
+    all its tokens present; single-word terms behave exactly as before."""
+    labels: set = set()
+    best = 0.0
+    for t in term_tokens:
+        tw = None
+        for label, w, ftoks in fields:
+            if _token_matches(t, ftoks):
+                tw = w if tw is None else max(tw, w)
+                labels.add(label)
+        if tw is None:
+            return None, set()
+        best = max(best, tw)
+    return best, labels
+
+
+def _match_record(query_tokens: list, record: dict, concepts: dict):
+    """AND across query concepts, OR within a concept (the word plus its synonyms).
+    Returns (score, matched_fields, matched_synonyms) or None."""
     fields = [(label, w, _tokens(text)) for (label, w, text) in _fields(record)]
     matched_fields: set = set()
+    matched_synonyms: set = set()
     score = 0.0
     for q in query_tokens:
+        candidates = [([q], None)] + [(_tokens(t), t) for t in concepts.get(q, [])]
         best = 0.0
         found = False
-        for label, w, toks in fields:
-            if _token_matches(q, toks):
+        for term_tokens, source in candidates:
+            if not term_tokens:
+                continue
+            w, labels = _best_term_match(term_tokens, fields)
+            if w is not None:
                 found = True
-                matched_fields.add(label)
                 best = max(best, w)
+                matched_fields |= labels
+                if source is not None:
+                    matched_synonyms.add(source)
         if not found:
             return None
         score += best
-    return score, sorted(matched_fields)
+    return score, sorted(matched_fields), sorted(matched_synonyms)
 
 
 def _passes_filters(record: dict, document_type, date_from, date_to) -> bool:
@@ -161,8 +247,13 @@ def _recency_key(record: dict) -> str:
     return d if isinstance(d, str) else ""
 
 
-def search(query: str, records: list, *, document_type=None, date_from=None, date_to=None) -> SearchResponse:
-    """Guarded keyword search over stored records. See module docstring."""
+def search(query: str, records: list, *, document_type=None, date_from=None,
+           date_to=None, synonyms=None) -> SearchResponse:
+    """Guarded keyword search over stored records. See module docstring.
+
+    `synonyms` overrides the curated map (a list of term groups); by default the
+    committed config/synonyms.json is used.
+    """
     q = (query or "").strip()
 
     verdict = guard.classify_question(q)
@@ -173,16 +264,21 @@ def search(query: str, records: list, *, document_type=None, date_from=None, dat
     if not qtokens:
         return SearchResponse("empty", q, [], None)
 
+    groups = _default_synonyms() if synonyms is None else synonyms
+    concepts = {t: _concept_terms(t, groups) for t in qtokens}
+
     hits = []
+    matched_synonyms: set = set()
     for r in records:
         if not _passes_filters(r, document_type, date_from, date_to):
             continue
-        m = _match_record(qtokens, r)
+        m = _match_record(qtokens, r, concepts)
         if m:
             hits.append(SearchHit(record=r, score=m[0], matched_fields=m[1]))
+            matched_synonyms.update(m[2])
 
     if not hits:
         return SearchResponse("no_match", q, [], guard.NO_MATCH_MESSAGE)
 
     hits.sort(key=lambda h: (h.score, _recency_key(h.record)), reverse=True)
-    return SearchResponse("ok", q, hits, None)
+    return SearchResponse("ok", q, hits, None, expansions=sorted(matched_synonyms))
