@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime
 import html
+import json
 import os
 import shutil
 import sys
@@ -44,7 +45,7 @@ from src.store import Store  # noqa: E402
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _SECRET_KEYS = (
-    "ANTHROPIC_API_KEY", "MAX_UPLOADS_PER_SESSION", "REAL_UPLOADS_PER_DAY",
+    "ANTHROPIC_API_KEY", "DEMO_LIVE_UPLOADS", "REAL_UPLOADS_PER_DAY",
     "R2_BUCKET", "R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 )
 
@@ -108,7 +109,7 @@ def cfg() -> dict:
     bucket = _secret("R2_BUCKET", "")
     return {
         "has_key": has_key,
-        "max_uploads": int(_secret("MAX_UPLOADS_PER_SESSION", "10") or 10),
+        "demo_live_cap": int(_secret("DEMO_LIVE_UPLOADS", "2") or 2),
         "real_cap": int(_secret("REAL_UPLOADS_PER_DAY", "25") or 25),
         "storage": "r2" if bucket else "local",
         "r2": {
@@ -347,28 +348,75 @@ def _run_ingest(up, ingest_fn):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+_DEMO_SAMPLES_DIR = os.path.join(_REPO, "demo_cache", "samples")
+
+
+def _demo_samples() -> list:
+    """Pre-baked demo runs: a bundled image plus its committed extraction. These
+    render exactly like a live read but cost nothing and touch no API."""
+    try:
+        with open(os.path.join(_DEMO_SAMPLES_DIR, "manifest.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for m in manifest if isinstance(manifest, list) else []:
+        try:
+            with open(os.path.join(_DEMO_SAMPLES_DIR, m.get("record", "")), encoding="utf-8") as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            continue
+        img = os.path.join(_DEMO_SAMPLES_DIR, m.get("original", ""))
+        if not os.path.exists(img):
+            continue
+        out.append({"id": m.get("id"), "title": m.get("title") or _headline(rec),
+                    "record": rec, "image": img})
+    return out
+
+
+def _load_sample(sample: dict) -> None:
+    """Drop a pre-baked sample into the session (like a live read result) and open it."""
+    ss = st.session_state
+    rec = dict(sample["record"])   # copy: session edits must never touch the fixture
+    rid = rec["record_id"]
+    if not any(r.get("record_id") == rid for r in ss.session_records):
+        ss.session_records.append(rec)
+        with open(sample["image"], "rb") as f:
+            ss.session_originals[rid] = (f.read(), os.path.basename(sample["image"]))
+    ss.selected = rid
+    st.rerun()
+
+
 def _demo_upload(c: dict) -> None:
+    samples = _demo_samples()
+    if samples:
+        st.markdown("**See it work on a sample**")
+        st.caption("Pick a document and watch how it is read and explained. Ready-made examples, no cost.")
+        cols = st.columns(len(samples))
+        for col, s in zip(cols, samples):
+            with col:
+                st.caption(f"{_DOC_ICONS.get(s['record'].get('document_type'), '📄')} {s['title']}")
+                if st.button("Read this", key="sample_" + str(s["id"]), use_container_width=True):
+                    _load_sample(s)
+        st.divider()
+
+    st.markdown("**Or try your own document**")
     if not c["has_key"]:
-        st.info(
-            "Uploading is not enabled in this demo deployment. Browse this profile's "
-            "records from the Timeline or Search."
-        )
+        st.info("Live upload is off on this demo. Try a sample above, or browse the Timeline and Search.")
         return
-
+    used = st.session_state.uploads
     st.caption(
-        "Processed live and kept only in this browser session: never saved to the "
-        "app, and not visible to any other profile or visitor."
+        "Read live and kept only in this browser session, never saved. "
+        f"Live trials this session: {used} / {c['demo_live_cap']}."
     )
-    st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
-
     up = st.file_uploader(
         "Prescription, lab report, or discharge summary",
         type=["png", "jpg", "jpeg", "webp", "pdf"],
     )
     if up is None:
         return
-    if st.session_state.uploads >= c["max_uploads"]:
-        st.error("Upload limit reached for this session.")
+    if used >= c["demo_live_cap"]:
+        st.error(f"Live-trial limit reached ({c['demo_live_cap']} this session). Try a sample above, or use it for real.")
         return
 
     if st.button("Read this document", type="primary"):

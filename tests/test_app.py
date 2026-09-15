@@ -53,6 +53,23 @@ def test_cfg_real_cap_default_and_override(monkeypatch):
     assert app.cfg()["real_cap"] == 5
 
 
+def test_cfg_demo_live_cap_default_and_override(monkeypatch):
+    monkeypatch.delenv("DEMO_LIVE_UPLOADS", raising=False)
+    assert app.cfg()["demo_live_cap"] == 2
+    monkeypatch.setenv("DEMO_LIVE_UPLOADS", "0")
+    assert app.cfg()["demo_live_cap"] == 0
+
+
+def test_demo_samples_load_prebaked_runs():
+    # Pre-baked runs let the demo show extraction with no API call.
+    samples = app._demo_samples()
+    assert len(samples) >= 1
+    for s in samples:
+        assert s["record"].get("record_id")   # a genuine extraction record
+        assert os.path.exists(s["image"])      # a bundled original image
+        assert s["title"]
+
+
 def test_record_title_prefers_diagnosis():
     r = {"record_date": "2025-01-01", "document_type": "prescription",
          "diagnosis": {"stated_text": "DRY ECZEMA"}}

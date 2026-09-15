@@ -1,0 +1,23 @@
+[
+  {
+    "id": "pharyngitis",
+    "title": "Prescription: sore throat",
+    "record": "pharyngitis.json",
+    "original": "pharyngitis.png",
+    "document_type": "prescription"
+  },
+  {
+    "id": "diabetes_lab",
+    "title": "Lab report: blood-sugar panel",
+    "record": "diabetes_lab.json",
+    "original": "diabetes_lab.png",
+    "document_type": "lab_report"
+  },
+  {
+    "id": "eye_rash",
+    "title": "Prescription: eyelid rash",
+    "record": "eye_rash.json",
+    "original": "eye_rash.png",
+    "document_type": "prescription"
+  }
+]
