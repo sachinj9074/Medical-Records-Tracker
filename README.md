@@ -43,7 +43,7 @@ The whole loop is: **upload → read → explain → file → find → hand over
 
 **5 · Episodes are clustered by deterministic code, not by the model.** Records are grouped using a union-find over literal signals (same provider, same medicine, a shared diagnosis keyword) that are also close in time (within 120 days). There is no learned "these conditions are related" step, which avoids wrongly merging two unrelated long-term conditions into one episode.
 
-**6 · A privacy firewall runs down the middle of the repo.** Your real records live in a local, git-ignored folder and never leave your machine. Only clearly synthetic sample records are committed. On the hosted demo, uploads are session-only and never written to shared storage, so one visitor can never see another's document.
+**6 · A privacy firewall runs down the middle of the repo.** Only clearly synthetic sample records are committed; real records are never in git. A real user's records are encrypted with a key derived from their password before they are stored, so wherever they live (a git-ignored local folder, or Cloudflare R2 when hosted) the store holds only ciphertext that no one else, the host included, can read. On the demo, uploads are session-only and never written to shared storage, so one visitor can never see another's document.
 
 ## How it works
 
@@ -148,10 +148,10 @@ Testing is built into the design, at three levels:
 
 ## Modes and privacy
 
-Every user signs in, and **each user's records live under their own store root**, so one user can never see another's: isolation by construction.
+The app opens on one screen: **Explore the demo** or **Use it for real**. Each user's records live under their own key prefix, so one user can never see another's: isolation by construction.
 
-- **Real mode** (a key is present locally): a single local account (you). Sign-in is frictionless by default; set `APP_PASSWORD` to gate it. Your documents are stored privately under a git-ignored `local_records/` folder and never leave your machine.
-- **Demo mode** (a deploy, or no key, or `APP_MODE=demo`): seeded demo profiles, each owning a synthetic archive under `demo_cache/`. Log in as one profile, then another, and you see only that profile's records (the demo passwords are shown on the login screen, since the data is fictional). Where a key is configured, a logged-in profile can also upload; those uploads are processed live and kept **only in the visitor's browser session**, never written to shared storage. A deploy always defaults to demo, even if a key is set, so a hosted app never silently runs real mode.
+- **Real mode:** a private, multi-user account. Records are encrypted with a key derived from your password before they are stored, so no one else, the host included, can read them without it. Storage is durable: Cloudflare R2 when the app is hosted with R2 secrets, or a git-ignored, still-encrypted `local_records/cloud/` folder when you run it yourself. A per-day extraction cap bounds the API cost. (Trade-off: because records are encrypted with your password, a forgotten password cannot be recovered in this version.)
+- **Demo mode:** seeded demo profiles, each owning a synthetic archive under `demo_cache/`. Log in as one, then another, and you see only that profile's records (the passwords are shown on the login screen, since the data is fictional). The demo leads with **pre-baked sample runs** that render a real extraction with no API call, and offers a small, capped number of live "try your own file" trials. So the public site demonstrates the full pipeline without freely spending the API budget.
 
 The original scan is always retained and shown next to the extraction, because the original is the source of truth and the structured data is a convenience layer that can be wrong.
 
@@ -160,7 +160,7 @@ The original scan is always retained and shown next to the extraction, because t
 - **It advises nothing.** Every output is a transcription, an organisation, or a neutral explanation, never a clinical judgment.
 - **The eval set is small and synthetic.** The scorer is built and runs the real pipeline over four labelled samples; the numbers are honest baselines, not a large-scale accuracy claim. A bigger, more varied set is the next step.
 - **Episode clustering is deterministic and literal.** It groups on exact provider, medicine, and diagnosis-keyword matches within a time window; it will not spot that two differently-named conditions are actually related.
-- **Sign-in and per-user isolation are demonstrable, not a hosted service.** Each user has a private store and the demo shows several isolated profiles, but there is no durable multi-tenant database behind it: real personal use is single-user and local. Federated login (OIDC) and durable per-user storage are on the roadmap.
+- **Multi-user is personal-scale, not a compliance-grade service.** Real accounts get durable, per-user-encrypted storage (Cloudflare R2 when hosted), which is enough for you and a few trusted people, but this is not a HIPAA-covered service. Federated login (OIDC), password reset or recovery keys, and backup/restore for encrypted stores are on the roadmap.
 - **Manual episode edits (merge/split) are not implemented.** Clustering is automatic only.
 
 ## Run it locally
@@ -188,30 +188,21 @@ Then run the app:
 streamlit run src/app.py
 ```
 
-With a key present the app starts in **real mode** against a private, git-ignored store. Never commit `.env`.
+The app opens on the **Explore the demo / Use it for real** screen. Running locally with no `R2_*` set, real accounts are stored in a git-ignored, still-encrypted `local_records/cloud/` folder on your machine. Never commit `.env`.
 
-## Deploy the public demo (Streamlit Community Cloud)
+## Deploy the hosted app (Streamlit Community Cloud + Cloudflare R2)
 
-Push the repo, then at [share.streamlit.io](https://share.streamlit.io) choose **New app**, pick this repo, the `main` branch, and `src/app.py`.
+Full step-by-step, including creating the R2 bucket and the exact secrets, is in **[DEPLOY.md](DEPLOY.md)**. In short:
 
-- **Browse-only demo (no key, zero cost):** deploy as-is. With no key present the app runs read-only over the synthetic records in `demo_cache/`.
-  Visitors sign in as a seeded demo profile (passwords shown on the login screen) and browse that profile's isolated archive.
-
-- **Interactive demo (a signed-in profile can also try its own upload):** under the app's **Secrets**, add:
-
-  ```toml
-  APP_MODE = "demo"
-  ANTHROPIC_API_KEY = "sk-ant-...  # use a dedicated, spend-capped demo key"
-  MAX_UPLOADS_PER_SESSION = "3"
-  ```
-
-  Uploads are then processed live and kept only in the visitor's session, never written to shared storage. Use a **spend-capped** key (set a hard limit in the Anthropic console) and the per-session cap so the demo cannot run up unbounded cost. The deploy stays in demo mode regardless, so the public URL never runs persistent real mode and never touches your real records.
+- **Zero-cost showcase (no key):** deploy as-is. Visitors browse the seeded profiles and run the pre-baked sample extractions; nothing calls the API.
+- **Full app (key + R2):** set `ANTHROPIC_API_KEY` and the four `R2_*` secrets. Real users then get durable, per-user-encrypted archives on R2, and both demo and real reads are capped (`DEMO_LIVE_UPLOADS`, `REAL_UPLOADS_PER_DAY`). Use a spend-capped Anthropic key as a backstop.
 
 ## Roadmap
 
 - A larger, more varied eval set (the scorer exists; grow the labelled data)
 - Manual episode merge and split
-- Federated login (OIDC) and durable per-user storage for true multi-user hosting
+- Backup and restore for encrypted stores, and password reset / recovery keys
+- Federated login (OIDC) for larger multi-user hosting
 - A short screen-recording walkthrough of the app
 - PDF multi-document handling, and broader document types (imaging reports, vaccination records)
 
