@@ -6,6 +6,8 @@ dicts; store.py does not validate schema, so they need not be complete records.
 
 import pytest
 
+from src import crypto
+from src.storage import InMemoryBackend
 from src.store import Store, StoreError
 
 
@@ -85,3 +87,48 @@ def test_delete_removes_record_and_original(tmp_path):
     assert not s.exists("rec_abc123")
     assert s.original_path("rec_abc123") is None
     assert s.delete("rec_abc123") is False  # idempotent
+
+
+# --- pluggable backend + encryption -----------------------------------------
+
+def test_store_over_injected_backend():
+    s = Store(backend=InMemoryBackend())
+    s.save(rec("rec_1"))
+    s.save(rec("rec_2"))
+    assert s.load("rec_1")["record_id"] == "rec_1"
+    assert {r["record_id"] for r in s.list()} == {"rec_1", "rec_2"}
+    assert s.delete("rec_1") is True and len(s.list()) == 1
+
+
+def test_encrypted_store_round_trip_and_ciphertext_at_rest(tmp_path):
+    backend = InMemoryBackend()
+    cipher = crypto.Cipher(crypto.new_data_key())
+    s = Store(backend=backend, cipher=cipher)
+
+    original = tmp_path / "scan.png"
+    original.write_bytes(b"\x89PNG the raw original")
+    s.save(rec("rec_e", episode_id="ep_9"), original_path=str(original))
+
+    # What the backend holds must be ciphertext, not the plaintext record/image.
+    raw_record = backend.get("records/rec_e.json")
+    assert b"rec_e" not in raw_record and b"ep_9" not in raw_record
+    raw_original = backend.get("originals/rec_e.png")
+    assert b"the raw original" not in raw_original
+
+    # But Store decrypts transparently.
+    assert s.load("rec_e")["episode_id"] == "ep_9"
+    data, ext = s.original_bytes("rec_e")
+    assert data == b"\x89PNG the raw original" and ext == ".png"
+    # No filesystem path is offered for an encrypted store.
+    assert s.original_path("rec_e") is None
+
+
+def test_encrypted_store_skips_records_it_cannot_decrypt():
+    backend = InMemoryBackend()
+    good = Store(backend=backend, cipher=crypto.Cipher(crypto.new_data_key()))
+    good.save(rec("rec_good"))
+    # A record encrypted under a different key lands in the same backend.
+    other = Store(backend=backend, cipher=crypto.Cipher(crypto.new_data_key()))
+    other.save(rec("rec_other"))
+    # good.list() returns only what its key can read, never raising.
+    assert {r["record_id"] for r in good.list()} == {"rec_good"}

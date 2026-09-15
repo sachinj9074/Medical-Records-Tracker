@@ -12,7 +12,10 @@ pymupdf>=1.24        # render PDF pages to images for vision extraction
 
 # Export and backup
 fpdf2>=2.7           # pure-Python PDF export of the doctor summary
-cryptography>=42.0   # optional passphrase encryption for backups (AES-GCM)
+cryptography>=42.0   # AES-GCM: backup passphrase encryption and per-user store encryption
+
+# Cloud storage (hosted deploy only; local runs never import it)
+boto3>=1.34          # Cloudflare R2 via its S3-compatible API
 
 # Tests
 pytest>=8.3
