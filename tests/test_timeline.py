@@ -147,3 +147,55 @@ def test_recluster_saves_only_changed(tmp_path):
     assert ids["a"] == ids["b"] and ids["a"] is not None
     # a second recluster is a no-op (ids already stable)
     assert timeline.recluster(store) == 0
+
+
+# --- medication history -----------------------------------------------------
+
+def _m(name, **kw):
+    d = {"name": name, "strength": None, "form": None, "dose": None,
+         "frequency": None, "duration": None}
+    d.update(kw)
+    return d
+
+
+def _mrec(rid, date, meds, provider="Dr A", needs_review="N"):
+    return {"record_id": rid, "record_date": date, "needs_review": needs_review,
+            "provider": {"name": provider, "clinic": None}, "medications": meds}
+
+
+def test_med_history_groups_by_normalised_name_newest_first():
+    recs = [
+        _mrec("r1", "2024-01-01", [_m("Tab Amoxicillin", strength="500mg", frequency="BD")]),
+        _mrec("r2", "2025-06-01", [_m("Amoxicillin 500", frequency="TDS")]),
+    ]
+    hist = timeline.build_medication_history(recs)
+    assert len(hist) == 1
+    mh = hist[0]
+    assert mh.key == "amoxicillin" and mh.count == 2
+    assert [o.date for o in mh.occurrences] == ["2025-06-01", "2024-01-01"]  # newest first
+    assert mh.name == "Amoxicillin 500"          # display from the most recent occurrence
+    assert mh.last_date == "2025-06-01"
+
+
+def test_med_history_orders_medicines_by_recency():
+    recs = [
+        _mrec("r1", "2023-01-01", [_m("Metformin")]),
+        _mrec("r2", "2025-01-01", [_m("Atorvastatin")]),
+    ]
+    assert [mh.key for mh in timeline.build_medication_history(recs)] == ["atorvastatin", "metformin"]
+
+
+def test_med_history_carries_fields_and_needs_review():
+    recs = [_mrec("r9", "2024-03-03",
+                  [_m("Levothyroxine", strength="50mcg", dose="1 tab", frequency="OD")],
+                  provider="Dr T", needs_review="Y")]
+    o = timeline.build_medication_history(recs)[0].occurrences[0]
+    assert o.needs_review is True and o.provider == "Dr T"
+    assert o.strength == "50mcg" and o.frequency == "OD" and o.record_id == "r9"
+
+
+def test_med_history_undated_sorts_last_and_empty():
+    recs = [_mrec("r1", None, [_m("Aspirin")]), _mrec("r2", "2024-01-01", [_m("Ibuprofen")])]
+    hist = timeline.build_medication_history(recs)
+    assert [mh.key for mh in hist] == ["ibuprofen", "aspirin"]
+    assert timeline.build_medication_history([]) == []

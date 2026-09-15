@@ -52,7 +52,8 @@ _SECRET_KEYS = (
 
 # Navigation: internal key -> sidebar label. Keys stay stable for routing/tests.
 NAV = [("Timeline", "🗓  Timeline"), ("Upload", "➕  Add a document"),
-       ("Search", "🔍  Search"), ("Export", "📤  Doctor summary")]
+       ("Search", "🔍  Search"), ("Medicines", "💊  Medicines"),
+       ("Export", "📤  Doctor summary")]
 
 _DOC_ICONS = {"prescription": "💊", "lab_report": "🧪", "discharge_summary": "🏥", "other": "📄"}
 
@@ -556,6 +557,47 @@ def page_search(store: Store, c: dict) -> None:
                 )
             if right.button("Open", key="se_" + r["record_id"]):
                 _open(r["record_id"])
+
+
+# --- medicines (history) ----------------------------------------------------
+
+def page_medicines(store: Store, c: dict) -> None:
+    st.subheader("💊  Medicines")
+    st.caption(
+        "Every medicine on your records, and each time it was prescribed, exactly "
+        "as written. A history of what was prescribed, not a statement of what you "
+        "are taking now."
+    )
+    history = timeline.build_medication_history(all_records(store, c))
+    if not history:
+        st.info("No medicines found on your records yet.")
+        return
+
+    for mh in history:
+        with st.container(border=True):
+            times = f"{mh.count} time{'s' if mh.count != 1 else ''}"
+            st.markdown(
+                f'💊 <span class="mrt-head">{_esc(mh.name)}</span> '
+                f'&nbsp;<span class="mrt-sub">prescribed {times}</span>',
+                unsafe_allow_html=True,
+            )
+            for i, o in enumerate(mh.occurrences):
+                left, right = st.columns([6, 1])
+                sf = " ".join(x for x in [_nz(o.strength),
+                                          f"({_nz(o.form)})" if _nz(o.form) else None] if x)
+                dosing = ", ".join(x for x in [_nz(o.dose), _nz(o.frequency), _nz(o.duration)] if x)
+                bits = [o.date or "Undated"]
+                for extra in (sf, dosing, _nz(o.provider)):
+                    if extra:
+                        bits.append(extra)
+                caveat = (' &nbsp;<span class="mrt-pill mrt-review">unverified</span>'
+                          if o.needs_review else "")
+                left.markdown(
+                    f'<span class="mrt-sub">{_esc(" · ".join(bits))}</span>{caveat}',
+                    unsafe_allow_html=True,
+                )
+                if o.record_id and right.button("Open", key=f"med_{mh.key}_{i}"):
+                    _open(o.record_id)
 
 
 # --- doctor summary (export) ------------------------------------------------
@@ -1101,6 +1143,8 @@ def main() -> None:
         page_upload(store, c)
     elif page == "Search":
         page_search(store, c)
+    elif page == "Medicines":
+        page_medicines(store, c)
     elif page == "Export":
         page_export(store, c)
     elif page == "Data" and c["mode"] == "real":

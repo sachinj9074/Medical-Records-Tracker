@@ -262,6 +262,71 @@ def build_timeline(records: list) -> list:
     return episodes
 
 
+# --- medication history -----------------------------------------------------
+
+@dataclass
+class MedOccurrence:
+    date: str | None
+    strength: str | None
+    form: str | None
+    dose: str | None
+    frequency: str | None
+    duration: str | None
+    provider: str | None
+    record_id: str | None
+    needs_review: bool
+
+
+@dataclass
+class MedHistory:
+    name: str            # the display name, from the most recent occurrence as written
+    key: str             # the normalised grouping key (_med_key)
+    occurrences: list    # newest first
+    count: int
+    last_date: str | None
+
+
+def build_medication_history(records: list) -> list:
+    """Group every prescribed medication across all records by normalised name.
+
+    Pure re-presentation of stored facts: for each medicine, every time it was
+    prescribed (date, strength, dosing as written, provider, source record). It is
+    a history ("prescribed on these dates"), never a claim about what the patient
+    is taking now, and it computes nothing clinical (no interactions, no
+    duplicate warnings). Occurrences from a needs_review record are flagged, the
+    same caveat used elsewhere.
+    """
+    groups: dict[str, dict] = {}
+    for r in records:
+        rid = r.get("record_id")
+        date = r.get("record_date") if isinstance(r.get("record_date"), str) else None
+        prov = r.get("provider") or {}
+        who = prov.get("name") or prov.get("clinic")
+        flagged = r.get("needs_review") == "Y"
+        for m in r.get("medications") or []:
+            key = _med_key(m.get("name"))
+            if not key:
+                continue
+            occ = MedOccurrence(
+                date=date, strength=m.get("strength"), form=m.get("form"),
+                dose=m.get("dose"), frequency=m.get("frequency"), duration=m.get("duration"),
+                provider=who, record_id=rid, needs_review=flagged,
+            )
+            g = groups.setdefault(key, {"name": m.get("name") or key, "occ": []})
+            g["occ"].append((occ, date or "", m.get("name") or key))
+
+    out = []
+    for key, g in groups.items():
+        ranked = sorted(g["occ"], key=lambda t: t[1], reverse=True)  # newest first, undated last
+        occs = [t[0] for t in ranked]
+        display = ranked[0][2] if ranked else key
+        last = next((o.date for o in occs if o.date), None)
+        out.append(MedHistory(name=display, key=key, occurrences=occs, count=len(occs), last_date=last))
+
+    out.sort(key=lambda mh: (mh.last_date or ""), reverse=True)   # most recent medicine first
+    return out
+
+
 # --- store glue -------------------------------------------------------------
 
 def recluster(store) -> int:
