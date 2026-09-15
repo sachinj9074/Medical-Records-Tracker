@@ -111,3 +111,26 @@ def test_r2_get_wraps_real_errors_as_storageerror():
     b = R2Backend("bucket", client=Boom())
     with pytest.raises(StorageError):
         b.get("records/a.json")
+
+
+def test_prefixed_backend_confines_and_isolates():
+    from src.storage import PrefixedBackend
+    base = InMemoryBackend()
+    alice = PrefixedBackend(base, "users/alice/")
+    bob = PrefixedBackend(base, "users/bob/")
+
+    alice.put("records/1.json", b"alice-record")
+    bob.put("records/1.json", b"bob-record")
+
+    # Each sees only its own records, under plain (un-prefixed) keys.
+    assert alice.list("records/") == ["records/1.json"]
+    assert alice.get("records/1.json") == b"alice-record"
+    assert bob.get("records/1.json") == b"bob-record"
+    # Under the hood they are namespaced apart, and neither can name the other.
+    assert set(base.list("")) == {"users/alice/records/1.json", "users/bob/records/1.json"}
+    with pytest.raises(KeyError):
+        bob.get("records/missing.json")
+
+    alice.delete("records/1.json")
+    assert not alice.exists("records/1.json")
+    assert bob.exists("records/1.json")   # deleting one user's key leaves the other's

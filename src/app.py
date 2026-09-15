@@ -6,18 +6,19 @@ story on each record, makes review one tap, and sells the doctor-ready export. A
 logic lives in the tested modules (ingest, timeline, search, export, store, guard,
 validate, auth); this file is presentation and flow only.
 
-Identity and modes:
-  - Every user signs in, and each user's records live under their own store root
-    (see store_root), so one user can never see another's records: isolation by
-    construction (src/auth.py owns identity).
-  - real  (a key is present locally): one local account (you). Records are stored
-    privately under local_records/, never leave the machine.
-  - demo  (a deploy, or no key): seeded demo profiles, each owning a synthetic
-    archive under demo_cache/. A reviewer logs in as one profile, then another,
-    and sees only that profile's records. Where a key is configured, a logged-in
-    demo profile can also upload; those uploads are kept ONLY in the session.
+Identity and modes (chosen on the landing screen, one per session):
+  - real  : a private, multi-user account (src/accounts.py). Records live under a
+    per-user prefix and are encrypted with a key derived from the user's password
+    (src/crypto.py), on the configured backend (Cloudflare R2 when hosted, local
+    files otherwise). No one else, host included, can read them without the
+    password. A per-day extraction cap bounds the operator's API cost.
+  - demo  : seeded demo profiles, each owning a synthetic archive under
+    demo_cache/. A reviewer logs in as one profile, then another, and sees only
+    that profile's records. Where a key is configured, a logged-in demo profile
+    can also upload; those uploads are kept ONLY in the session.
 
-See PROJECT_SPEC.md sections 5, 8, 10, 15.
+Isolation is by construction: a user_id picks the store prefix, and no code path
+enumerates across users. See PROJECT_SPEC.md sections 5, 8, 10, 15.
 """
 
 from __future__ import annotations
@@ -35,14 +36,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st  # noqa: E402
 
-from src import auth, backup, export, guard, ingest, search, timeline, validate  # noqa: E402
+from src import (accounts, auth, backup, crypto, export, guard, ingest,  # noqa: E402
+                 search, timeline, validate)
+from src.storage import LocalBackend, PrefixedBackend, R2Backend  # noqa: E402
 from src.store import Store  # noqa: E402
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _SECRET_KEYS = (
-    "ANTHROPIC_API_KEY", "APP_MODE", "MAX_UPLOADS_PER_SESSION",
-    "APP_USER", "APP_USER_NAME", "APP_PASSWORD",
+    "ANTHROPIC_API_KEY", "MAX_UPLOADS_PER_SESSION", "REAL_UPLOADS_PER_DAY",
+    "R2_BUCKET", "R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 )
 
 # Navigation: internal key -> sidebar label. Keys stay stable for routing/tests.
@@ -76,7 +79,8 @@ def _secret(name: str, default: str = "") -> str:
 
 
 def _hosted() -> bool:
-    """True when Streamlit secrets are configured, i.e. this is a deploy."""
+    """True when Streamlit secrets are configured, i.e. this is a deploy (used
+    only to warn if a deploy has no durable storage set up)."""
     try:
         return any(k in st.secrets for k in _SECRET_KEYS)
     except Exception:
@@ -94,35 +98,66 @@ def bridge_secrets() -> None:
 
 
 def cfg() -> dict:
+    """Deployment capabilities (not the mode: mode is a per-session user choice).
+
+    `storage` is "r2" when R2 secrets are present (the durable hosted store),
+    else "local" (a private on-disk store for running it yourself).
+    """
     key = os.getenv("ANTHROPIC_API_KEY", "")
     has_key = bool(key and key != "paste-your-key-here")
-    # An explicit APP_MODE always wins. A deploy (secrets present) defaults to the
-    # safe demo even when a key is set, so a hosted app never silently runs real
-    # mode. Locally, real mode is the default when a key is present.
-    explicit = _secret("APP_MODE", "").lower()
-    if explicit in ("demo", "real"):
-        mode = explicit
-    elif _hosted():
-        mode = "demo"
-    else:
-        mode = "real" if has_key else "demo"
+    bucket = _secret("R2_BUCKET", "")
     return {
-        "mode": mode,
-        "max_uploads": int(_secret("MAX_UPLOADS_PER_SESSION", "10") or 10),
         "has_key": has_key,
+        "max_uploads": int(_secret("MAX_UPLOADS_PER_SESSION", "10") or 10),
+        "real_cap": int(_secret("REAL_UPLOADS_PER_DAY", "25") or 25),
+        "storage": "r2" if bucket else "local",
+        "r2": {
+            "bucket": bucket,
+            "endpoint_url": _secret("R2_ENDPOINT_URL", "") or None,
+            "access_key_id": _secret("R2_ACCESS_KEY_ID", "") or None,
+            "secret_access_key": _secret("R2_SECRET_ACCESS_KEY", "") or None,
+        },
     }
 
 
+# Encrypted real-mode records land here when no R2 bucket is configured (running
+# it yourself). The demo keeps its own plaintext, synthetic archive.
+_REAL_LOCAL_ROOT = os.path.join(_REPO, "local_records", "cloud")
+
+
 def store_root(mode: str, user_id: str) -> str:
-    """Per-user store root. Isolation lives here: the user_id picks the folder,
-    and no code path ever reads across users."""
+    """Per-user store root for a local plaintext store (demo only now)."""
+    return os.path.join(_REPO, "demo_cache", "users", user_id, "store")
+
+
+@st.cache_resource
+def _r2_client(bucket: str, endpoint: str | None, akid: str | None, secret: str | None):
+    """A boto3 S3 client for R2, cached so it is built once, not every rerun."""
+    import boto3
+    return boto3.client("s3", endpoint_url=endpoint, region_name="auto",
+                        aws_access_key_id=akid, aws_secret_access_key=secret)
+
+
+def _real_base_backend(c: dict):
+    """The shared backend for real accounts and records (R2 when configured)."""
+    if c["storage"] == "r2":
+        r = c["r2"]
+        client = _r2_client(r["bucket"], r["endpoint_url"], r["access_key_id"], r["secret_access_key"])
+        return R2Backend(r["bucket"], client=client)
+    return LocalBackend(_REAL_LOCAL_ROOT)
+
+
+def _account_store(c: dict) -> accounts.AccountStore:
+    return accounts.AccountStore(_real_base_backend(c))
+
+
+def store_for(mode: str, user_id: str, c: dict, cipher=None) -> Store:
+    """The Store for a signed-in user. Demo is a local plaintext archive; real is
+    a per-user, encrypted store confined to its own prefix on the backend."""
     if mode == "demo":
-        return os.path.join(_REPO, "demo_cache", "users", user_id, "store")
-    return os.path.join(_REPO, "local_records", "store", "users", user_id)
-
-
-def store_for(mode: str, user_id: str) -> Store:
-    return Store(store_root(mode, user_id))
+        return Store(store_root("demo", user_id))
+    backend = PrefixedBackend(_real_base_backend(c), f"users/{user_id}/")
+    return Store(backend=backend, cipher=cipher)
 
 
 def export_filename(day: str | None = None) -> str:
@@ -259,10 +294,14 @@ def page_upload(store: Store, c: dict) -> None:
             "2. It is read and explained in plain language, and filed on your timeline.\n"
             "3. Find it again later, or export a clean summary to hand a doctor."
         )
-    st.caption("Read, explained, and saved privately on this machine.")
+    st.caption("Read, explained, and saved to your private, encrypted archive.")
     if not c["has_key"]:
         st.warning("No ANTHROPIC_API_KEY found. Paste your key into .env to enable extraction.")
-    st.caption(f"Uploads this session: {st.session_state.uploads} / {c['max_uploads']}")
+
+    uid = st.session_state.user["id"]
+    astore = _account_store(c)
+    used = astore.usage_today(uid)
+    st.caption(f"Documents read today: {used} / {c['real_cap']}")
 
     up = st.file_uploader(
         "Prescription, lab report, or discharge summary",
@@ -270,15 +309,15 @@ def page_upload(store: Store, c: dict) -> None:
     )
     if up is None:
         return
-    if st.session_state.uploads >= c["max_uploads"]:
-        st.error("Upload limit reached for this session.")
+    if used >= c["real_cap"]:
+        st.error(f"Daily limit reached ({c['real_cap']} documents). This caps the API cost; try again tomorrow.")
         return
 
     if st.button("Read this document", type="primary"):
         rec, report = _run_ingest(up, lambda p: _stored_ingest(store, p))
         if rec is None:
             return
-        st.session_state.uploads += 1
+        astore.record_usage(uid)
         note = "needs your review" if report.needs_review == "Y" else "filed"
         st.success(f"Done ({report.tier_used} read). This record {note}.")
         st.session_state.selected = rec["record_id"]
@@ -521,7 +560,11 @@ def _pdf_or_none(records: list):
         return None
 
 
-# --- data: backup and restore (real mode only) ------------------------------
+# --- data: backup and restore -----------------------------------------------
+# Temporarily unlinked from the nav: backup.py reaches into store.records_dir,
+# which an encrypted (cloud or local) store does not expose. Re-enabling it means
+# rebuilding backup over Store's public API (list + original_bytes); tracked as a
+# follow-up. Kept here, still covered by test_backup.py against a local store.
 
 def page_data(store: Store, c: dict) -> None:
     st.subheader("🗄  Data and backup")
@@ -669,13 +712,15 @@ def _original_panel(store: Store, rec: dict, is_session: bool) -> None:
         else:
             st.info(f"Original on file: {name}")
         return
-    op = store.original_path(rid)
-    if op and os.path.splitext(op)[1].lower() in _IMAGE_EXTS:
-        _show_image(op)
-    elif op:
-        st.info(f"Original on file: {os.path.basename(op)}")
-    else:
+    got = store.original_bytes(rid)   # decrypts for an encrypted store
+    if not got:
         st.caption("No original on file.")
+        return
+    data, ext = got
+    if ext in _IMAGE_EXTS:
+        _show_image(data)
+    else:
+        st.info(f"Original on file ({ext.lstrip('.') or 'document'}).")
 
 
 def render_record_detail(store: Store, rec: dict, c: dict) -> None:
@@ -784,39 +829,55 @@ def _sign_in(user: auth.User) -> None:
     st.rerun()
 
 
+def _sign_in_real(acct: dict, data_key: bytes) -> None:
+    """Sign in a real user, keeping their data key in session (memory only) so
+    their store can be decrypted for the life of the session."""
+    st.session_state.user_key = data_key
+    _sign_in(auth.User(acct["user_id"], acct["name"], is_demo=False))
+
+
 def _login(c: dict) -> None:
-    """Render the sign-in gate for the current mode and sign the user in.
-
-    Real mode with no APP_PASSWORD is frictionless (auto sign-in). Demo mode
-    shows the seeded profiles so a reviewer can switch between isolated archives.
-    """
-    mode = c["mode"]
-    if mode == "real" and not auth.real_password_required():
-        _sign_in(auth.real_user())
+    """One landing screen (pick demo or real), then that mode's sign-in."""
+    ss = st.session_state
+    if ss.mode is None:
+        _landing(c)
         return
+    st.markdown("## 🩺 Medical Records Tracker")
+    if st.button("←  Back to start"):
+        ss.mode = None
+        st.rerun()
+    st.divider()
+    if ss.mode == "demo":
+        _demo_login(c)
+    else:
+        _real_login(c)
 
+
+def _landing(c: dict) -> None:
     st.markdown("## 🩺 Medical Records Tracker")
     st.markdown("Turn messy, handwritten prescriptions and reports into a readable, searchable health record.")
     st.caption("🛈 " + guard.STANDING_NOTICE)
     st.divider()
+    a, b = st.columns(2)
+    with a, st.container(border=True):
+        st.markdown("### 🔎 Explore the demo")
+        st.caption("Browse ready-made profiles and see records read, explained, and organised. Nothing to set up.")
+        if st.button("Explore the demo", use_container_width=True):
+            st.session_state.mode = "demo"
+            st.rerun()
+    with b, st.container(border=True):
+        st.markdown("### 🔒 Use it for real")
+        st.caption("Your own private archive. Records are encrypted with your password, so no one else, the host included, can read them.")
+        if st.button("Sign in or create an account", type="primary", use_container_width=True):
+            st.session_state.mode = "real"
+            st.rerun()
 
-    if mode == "real":
-        st.subheader("Sign in")
-        with st.form("login_real"):
-            pw = st.text_input("Password", type="password")
-            if st.form_submit_button("Sign in", type="primary"):
-                user = auth.authenticate_real(pw)
-                if user:
-                    _sign_in(user)
-                else:
-                    st.error("Incorrect password.")
-        return
 
-    # Demo: choose an isolated profile.
+def _demo_login(c: dict) -> None:
     st.subheader("Choose a demo profile")
     st.caption(
-        "A portfolio demo of per-user access control: each profile is a separate "
-        "private archive, and one profile never sees another's records."
+        "A demo of per-user access control: each profile is a separate private "
+        "archive, and one profile never sees another's records."
     )
     users = auth.demo_users()
     if not users:
@@ -838,13 +899,51 @@ def _login(c: dict) -> None:
                 st.error("Incorrect password for that profile.")
 
 
+def _real_login(c: dict) -> None:
+    st.subheader("Use it for real")
+    if _hosted() and c["storage"] != "r2":
+        st.info(
+            "Durable cloud storage is not configured on this deployment, so real "
+            "records may not persist here. Set the R2 secrets, or run it locally."
+        )
+    astore = _account_store(c)
+    tab_in, tab_new = st.tabs(["Sign in", "Create an account"])
+    with tab_in:
+        with st.form("real_signin"):
+            u = st.text_input("Username")
+            p = st.text_input("Password", type="password")
+            if st.form_submit_button("Sign in", type="primary"):
+                res = astore.authenticate(u, p)
+                if res:
+                    _sign_in_real(*res)
+                else:
+                    st.error("Wrong username or password.")
+    with tab_new:
+        st.caption(
+            "Your password encrypts your records. There is no reset: if you forget "
+            "it, your records cannot be recovered."
+        )
+        with st.form("real_signup"):
+            name = st.text_input("Your name")
+            u = st.text_input("Choose a username")
+            p = st.text_input("Choose a password (8+ characters)", type="password")
+            p2 = st.text_input("Confirm password", type="password")
+            if st.form_submit_button("Create account", type="primary"):
+                if p != p2:
+                    st.error("The two passwords do not match.")
+                else:
+                    try:
+                        acct = astore.create(u, name, p)
+                    except accounts.AccountError as e:
+                        st.error(str(e))
+                    else:
+                        _sign_in_real(acct, crypto.open_keyset(p, acct["keyset"]))
+
+
 def _sidebar(c: dict) -> None:
-    items = list(NAV)
-    if c["mode"] == "real":   # backup/restore is a personal-use, real-mode feature
-        items = items + [("Data", "🗄  Data")]
     with st.sidebar:
         st.markdown("### 🩺 Medical Records Tracker")
-        for key, label in items:
+        for key, label in NAV:
             active = st.session_state.nav == key
             if st.button(label, key="nav_" + key, use_container_width=True,
                          type="primary" if active else "secondary"):
@@ -857,22 +956,23 @@ def _sidebar(c: dict) -> None:
 
 
 def _account_card(c: dict) -> None:
-    """Sidebar account card, plus a log-out control where signing out is meaningful."""
+    """Sidebar account card and log-out."""
     user = st.session_state.user
     if c["mode"] == "real":
-        st.success("**Local mode**")
-        st.caption(f"Signed in as {user['name']}. Records are saved privately on this machine.")
+        st.success(f"**{user['name']}**")
+        st.caption("Your private, encrypted archive: readable only with your password.")
     else:
         st.info(f"**Demo profile: {user['name']}**")
         st.caption(
             "You are viewing this profile's records only. Nothing here is visible "
             "to other profiles or visitors."
         )
-    if c["mode"] == "demo" or auth.real_password_required():
-        if st.button("Log out"):
-            st.session_state.user = None
-            _reset_session_for("")
-            st.rerun()
+    if st.button("Log out"):
+        st.session_state.user = None
+        st.session_state.user_key = None
+        st.session_state.mode = None
+        _reset_session_for("")
+        st.rerun()
 
 
 def main() -> None:
@@ -888,6 +988,8 @@ def main() -> None:
     ss.setdefault("session_records", [])
     ss.setdefault("session_originals", {})
     ss.setdefault("user", None)
+    ss.setdefault("user_key", None)   # a real user's data key: session memory only
+    ss.setdefault("mode", None)       # landing choice, before sign-in
     ss.setdefault("active_uid", None)
     ss.setdefault("nav", "Timeline")
 
@@ -898,7 +1000,15 @@ def main() -> None:
         _login(c)
         return
 
-    store = store_for(c["mode"], ss.user["id"])
+    mode = "demo" if ss.user["is_demo"] else "real"
+    if mode == "real" and not ss.user_key:
+        # Lost the decryption key (e.g. the server restarted mid-session): re-auth.
+        ss.user = None
+        _login(c)
+        return
+    c["mode"] = mode
+    cipher = crypto.Cipher(ss.user_key) if mode == "real" else None
+    store = store_for(mode, ss.user["id"], c, cipher)
     _sidebar(c)
 
     st.markdown("#### 🩺 Medical Records Tracker")
@@ -918,8 +1028,6 @@ def main() -> None:
         page_search(store, c)
     elif page == "Export":
         page_export(store, c)
-    elif page == "Data" and c["mode"] == "real":
-        page_data(store, c)
     else:
         page_timeline(store, c)
 

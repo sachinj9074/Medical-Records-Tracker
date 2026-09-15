@@ -81,6 +81,44 @@ class LocalBackend:
             pass
 
 
+# --- per-user namespace -----------------------------------------------------
+
+class PrefixedBackend:
+    """Wraps a backend so every key is transparently confined to one prefix.
+
+    This is the per-user isolation primitive for a shared bucket: a user's Store
+    is bound to PrefixedBackend(base, "users/<id>/"), so it can only ever read or
+    write under that user's own prefix. list() strips the prefix so the wrapped
+    Store still sees plain "records/..." / "originals/..." keys.
+    """
+
+    def __init__(self, inner, prefix: str):
+        if not prefix.endswith("/"):
+            prefix += "/"
+        self.inner = inner
+        self.prefix = prefix
+        self.root = None
+
+    def put(self, key: str, data: bytes) -> None:
+        self.inner.put(self.prefix + key, data)
+
+    def get(self, key: str) -> bytes:
+        try:
+            return self.inner.get(self.prefix + key)
+        except KeyError:
+            raise KeyError(key)
+
+    def exists(self, key: str) -> bool:
+        return self.inner.exists(self.prefix + key)
+
+    def list(self, prefix: str) -> list[str]:
+        n = len(self.prefix)
+        return [k[n:] for k in self.inner.list(self.prefix + prefix)]
+
+    def delete(self, key: str) -> None:
+        self.inner.delete(self.prefix + key)
+
+
 # --- in-memory (tests) ------------------------------------------------------
 
 class InMemoryBackend:

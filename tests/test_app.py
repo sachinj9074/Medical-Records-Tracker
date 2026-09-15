@@ -13,15 +13,14 @@ def test_export_filename():
     assert app.export_filename("2026-08-17") == "medical_summary_2026-08-17.md"
 
 
-def test_store_root_real_vs_demo():
-    assert app.store_root("real", "me").endswith(os.path.join("local_records", "store", "users", "me"))
+def test_store_root_demo_layout():
+    # store_root now serves the demo's local plaintext archive only.
     assert app.store_root("demo", "rahul").endswith(os.path.join("demo_cache", "users", "rahul", "store"))
 
 
 def test_store_root_isolates_users():
     # Two users resolve to different roots; that is the isolation guarantee.
     assert app.store_root("demo", "rahul") != app.store_root("demo", "ananya")
-    assert app.store_root("real", "me") != app.store_root("real", "someone_else")
 
 
 def test_nz_normalises_blanks():
@@ -30,23 +29,28 @@ def test_nz_normalises_blanks():
     assert app._nz(None) is None
 
 
-def test_cfg_defaults_to_demo_without_key(monkeypatch):
+def test_cfg_reports_key_presence_and_no_locked_mode(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("APP_MODE", raising=False)
-    assert app.cfg()["mode"] == "demo"
-
-
-def test_cfg_real_mode_when_key_present(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    monkeypatch.delenv("APP_MODE", raising=False)
+    monkeypatch.delenv("R2_BUCKET", raising=False)
     c = app.cfg()
-    assert c["mode"] == "real" and c["has_key"] is True
-
-
-def test_cfg_explicit_mode_overrides(monkeypatch):
+    assert c["has_key"] is False
+    assert c["storage"] == "local"
+    assert "mode" not in c            # mode is a per-session choice now, not config
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    monkeypatch.setenv("APP_MODE", "demo")
-    assert app.cfg()["mode"] == "demo"
+    assert app.cfg()["has_key"] is True
+
+
+def test_cfg_selects_r2_when_bucket_configured(monkeypatch):
+    monkeypatch.setenv("R2_BUCKET", "mrt-bucket")
+    c = app.cfg()
+    assert c["storage"] == "r2" and c["r2"]["bucket"] == "mrt-bucket"
+
+
+def test_cfg_real_cap_default_and_override(monkeypatch):
+    monkeypatch.delenv("REAL_UPLOADS_PER_DAY", raising=False)
+    assert app.cfg()["real_cap"] == 25
+    monkeypatch.setenv("REAL_UPLOADS_PER_DAY", "5")
+    assert app.cfg()["real_cap"] == 5
 
 
 def test_record_title_prefers_diagnosis():
