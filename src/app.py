@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st  # noqa: E402
 
-from src import (accounts, auth, backup, crypto, export, guard, ingest,  # noqa: E402
+from src import (accounts, auth, backup, chat, crypto, export, guard, ingest,  # noqa: E402
                  search, timeline, validate)
 from src.storage import LocalBackend, PrefixedBackend, R2Backend  # noqa: E402
 from src.store import Store  # noqa: E402
@@ -46,7 +46,8 @@ from src.store import Store  # noqa: E402
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _SECRET_KEYS = (
-    "ANTHROPIC_API_KEY", "DEMO_LIVE_UPLOADS", "REAL_UPLOADS_PER_DAY", "REAL_ACCESS_CODE",
+    "ANTHROPIC_API_KEY", "DEMO_LIVE_UPLOADS", "REAL_UPLOADS_PER_DAY", "REAL_CHATS_PER_DAY",
+    "REAL_ACCESS_CODE",
     "R2_BUCKET", "R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 )
 
@@ -113,6 +114,7 @@ def cfg() -> dict:
         "has_key": has_key,
         "demo_live_cap": int(_secret("DEMO_LIVE_UPLOADS", "2") or 2),
         "real_cap": int(_secret("REAL_UPLOADS_PER_DAY", "25") or 25),
+        "chat_cap": int(_secret("REAL_CHATS_PER_DAY", "30") or 30),
         # Shared invite code gating the whole real section. Blank = no gate.
         "real_access_code": _secret("REAL_ACCESS_CODE", ""),
         "storage": "r2" if bucket else "local",
@@ -559,6 +561,102 @@ def page_search(store: Store, c: dict) -> None:
                 _open(r["record_id"])
 
 
+# --- ask (chat retrieval) ---------------------------------------------------
+
+def _chat_cards(records: list, keyns: str) -> None:
+    for i, r in enumerate(records[:12]):
+        with st.container(border=True):
+            left, right = st.columns([6, 1])
+            left.markdown(
+                f'{_doc_icon(r)} <span class="mrt-head">{_esc(_headline(r))}</span> &nbsp;{_pill(r)}<br>'
+                f'<span class="mrt-sub">{_esc(r.get("record_date") or "Undated")}'
+                + (f' · {_esc(_provider_str(r))}' if _provider_str(r) else "")
+                + "</span>",
+                unsafe_allow_html=True,
+            )
+            if right.button("Open", key=f"{keyns}_{i}_{r.get('record_id')}"):
+                _open(r["record_id"])
+
+
+def _chat_med_cards(medicines: list, keyns: str) -> None:
+    for i, mh in enumerate(medicines):
+        with st.container(border=True):
+            left, right = st.columns([6, 1])
+            left.markdown(
+                f'💊 <span class="mrt-head">{_esc(mh.name)}</span> &nbsp;'
+                f'<span class="mrt-sub">{mh.count}x · last {mh.last_date or "undated"}</span>',
+                unsafe_allow_html=True,
+            )
+            rid = mh.occurrences[0].record_id if mh.occurrences else None
+            if rid and right.button("Open", key=f"{keyns}_{i}_{mh.key}"):
+                _open(rid)
+
+
+def _render_chat_answer(ans, turn_id: int) -> None:
+    if ans.status == "refused":
+        st.warning(ans.message)
+        return
+    if ans.status == "empty":
+        st.info(ans.message or chat.NOT_SEARCHABLE)
+        return
+    if ans.status == "no_match":
+        st.info(ans.message)
+        if ans.intent_terms:
+            st.caption("Searched for: " + ", ".join(ans.intent_terms))
+        return
+
+    if ans.lead:
+        st.markdown(f"**{_esc(ans.lead)}**", unsafe_allow_html=True)
+    trans = []
+    if ans.intent_terms:
+        trans.append("searched " + ", ".join(ans.intent_terms))
+    if ans.expansions:
+        trans.append("related " + ", ".join(ans.expansions))
+    if trans:
+        st.caption("Interpreted as: " + " · ".join(trans))
+    if ans.shape == "medications" and ans.medicines:
+        _chat_med_cards(ans.medicines, f"chatmed_{turn_id}")
+    else:
+        _chat_cards(ans.records, f"chatrec_{turn_id}")
+
+
+def page_ask(store: Store, c: dict) -> None:
+    st.subheader("💬  Ask")
+    st.caption(
+        "Ask your records in plain language. Answers come only from your records: "
+        "nothing is interpreted, and medical-advice questions are declined and sent "
+        "back to a doctor."
+    )
+    if not c["has_key"]:
+        st.warning("No ANTHROPIC_API_KEY found. Ask needs a key to understand your question.")
+        return
+
+    uid = st.session_state.user["id"]
+    astore = _account_store(c)
+    used = astore.chats_today(uid)
+    st.caption(f"Questions today: {used} / {c['chat_cap']}")
+
+    for ti, turn in enumerate(st.session_state.chat_log):
+        with st.chat_message("user"):
+            st.markdown(turn["q"])
+        with st.chat_message("assistant"):
+            _render_chat_answer(turn["a"], ti)
+
+    q = st.chat_input("Ask about your records")
+    if not q:
+        return
+    if used >= c["chat_cap"]:
+        st.error(f"Daily question limit reached ({c['chat_cap']}). Try again tomorrow.")
+        return
+    history = [t["q"] for t in st.session_state.chat_log]
+    with st.spinner("Searching your records..."):
+        ans = chat.answer(q, all_records(store, c), history=history)
+    if ans.status != "refused":   # a refusal is deterministic and spends no API
+        astore.record_chat(uid)
+    st.session_state.chat_log = st.session_state.chat_log + [{"q": q, "a": ans}]
+    st.rerun()
+
+
 # --- medicines (history) ----------------------------------------------------
 
 def page_medicines(store: Store, c: dict) -> None:
@@ -913,6 +1011,7 @@ def _reset_session_for(uid: str) -> None:
     ss.uploads = 0
     ss.selected = None
     ss.editing = None
+    ss.chat_log = []
     ss.active_uid = uid
     ss.nav = "Timeline"
 
@@ -1054,8 +1153,8 @@ def _real_login(c: dict) -> None:
 
 def _sidebar(c: dict) -> None:
     items = list(NAV)
-    if c["mode"] == "real":   # backup/restore is a personal-use, real-mode feature
-        items = items + [("Data", "🗄  Data")]
+    if c["mode"] == "real":   # ask and backup are personal-use, real-mode features
+        items = items + [("Ask", "💬  Ask"), ("Data", "🗄  Data")]
     with st.sidebar:
         st.markdown("### 🩺 Medical Records Tracker")
         for key, label in items:
@@ -1107,6 +1206,7 @@ def main() -> None:
     ss.setdefault("user_key", None)   # a real user's data key: session memory only
     ss.setdefault("mode", None)       # landing choice, before sign-in
     ss.setdefault("real_unlocked", False)   # shared invite code passed this session
+    ss.setdefault("chat_log", [])
     ss.setdefault("active_uid", None)
     ss.setdefault("nav", "Timeline")
 
@@ -1147,6 +1247,8 @@ def main() -> None:
         page_medicines(store, c)
     elif page == "Export":
         page_export(store, c)
+    elif page == "Ask" and c["mode"] == "real":
+        page_ask(store, c)
     elif page == "Data" and c["mode"] == "real":
         page_data(store, c)
     else:

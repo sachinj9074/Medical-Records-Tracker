@@ -80,6 +80,7 @@ This is your `ANTHROPIC_API_KEY`. Skip this part only for the zero-cost showcase
    # optional, these are the defaults
    DEMO_LIVE_UPLOADS   = "2"    # live "try your own file" trials per demo session
    REAL_UPLOADS_PER_DAY = "25"  # documents a real account may read per day
+   REAL_CHATS_PER_DAY  = "30"   # Ask-page questions a real account may ask per day
    ```
 
    Leave `REAL_ACCESS_CODE` blank (or unset) only if you want anyone to be able

@@ -107,20 +107,32 @@ class AccountStore:
 
     # --- usage / cost cap --------------------------------------------------
 
-    def usage_today(self, user_id: str) -> int:
+    def _count_today(self, user_id: str, field: str) -> int:
         acct = self._load(user_id) or {}
-        today = datetime.date.today().isoformat()
-        return int((acct.get("usage") or {}).get(today, 0))
+        return int((acct.get(field) or {}).get(datetime.date.today().isoformat(), 0))
 
-    def record_usage(self, user_id: str, n: int = 1) -> int:
-        """Add n to today's counter and prune old days. Returns today's total."""
+    def _record(self, user_id: str, field: str, n: int) -> int:
         acct = self._load(user_id)
         if not acct:
             return 0
         today = datetime.date.today().isoformat()
-        usage = dict(acct.get("usage") or {})
-        usage[today] = int(usage.get(today, 0)) + n
+        counts = dict(acct.get(field) or {})
+        counts[today] = int(counts.get(today, 0)) + n
         cutoff = (datetime.date.today() - datetime.timedelta(days=_USAGE_KEEP_DAYS)).isoformat()
-        acct["usage"] = {d: v for d, v in usage.items() if d >= cutoff}
+        acct[field] = {d: v for d, v in counts.items() if d >= cutoff}
         self._save(acct)
-        return acct["usage"][today]
+        return acct[field][today]
+
+    # Extractions (document reads) and chat questions are metered separately, each
+    # spending the operator's API budget.
+    def usage_today(self, user_id: str) -> int:
+        return self._count_today(user_id, "usage")
+
+    def record_usage(self, user_id: str, n: int = 1) -> int:
+        return self._record(user_id, "usage", n)
+
+    def chats_today(self, user_id: str) -> int:
+        return self._count_today(user_id, "chat_usage")
+
+    def record_chat(self, user_id: str, n: int = 1) -> int:
+        return self._record(user_id, "chat_usage", n)

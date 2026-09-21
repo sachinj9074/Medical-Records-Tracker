@@ -60,6 +60,13 @@ def test_cfg_demo_live_cap_default_and_override(monkeypatch):
     assert app.cfg()["demo_live_cap"] == 0
 
 
+def test_cfg_chat_cap_default_and_override(monkeypatch):
+    monkeypatch.delenv("REAL_CHATS_PER_DAY", raising=False)
+    assert app.cfg()["chat_cap"] == 30
+    monkeypatch.setenv("REAL_CHATS_PER_DAY", "5")
+    assert app.cfg()["chat_cap"] == 5
+
+
 def test_cfg_real_access_code(monkeypatch):
     monkeypatch.delenv("REAL_ACCESS_CODE", raising=False)
     assert app.cfg()["real_access_code"] == ""     # blank = no gate

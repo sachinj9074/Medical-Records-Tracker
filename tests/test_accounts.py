@@ -99,3 +99,15 @@ def test_usage_on_unknown_user_is_zero():
     s = store()
     assert s.usage_today("ghost") == 0
     assert s.record_usage("ghost") == 0
+
+
+def test_chat_counter_is_separate_from_uploads():
+    s = store()
+    s.create("me", "Me", "my-long-pass")
+    assert s.chats_today("me") == 0
+    assert s.record_chat("me") == 1
+    assert s.record_chat("me") == 2
+    assert s.chats_today("me") == 2
+    assert s.usage_today("me") == 0     # chats do not touch the extraction counter
+    s.record_usage("me")
+    assert s.usage_today("me") == 1 and s.chats_today("me") == 2
