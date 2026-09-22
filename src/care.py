@@ -111,3 +111,84 @@ def ics_event(followup: FollowUp, *, title_prefix: str = "Medical follow-up") ->
         "END:VEVENT", "END:VCALENDAR",
     ]
     return "\r\n".join(lines) + "\r\n"
+
+
+# --- lab trends -------------------------------------------------------------
+
+_NUM = re.compile(r"[-+]?\d*\.?\d+")
+
+
+def parse_value(s):
+    """The numeric value in a result string, or None. '7.2', '142', '7.2 %',
+    '1,240' parse; an inequality or word ('>200', 'Positive') is skipped, since it
+    is not a single plottable value."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    if any(ch in s for ch in "<>≤≥"):   # <, >, <=, >= are ranges, not points
+        return None
+    m = _NUM.search(s.replace(",", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group())
+    except ValueError:
+        return None
+
+
+def _test_key(name) -> str:
+    if not isinstance(name, str):
+        return ""
+    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+@dataclass
+class TrendPoint:
+    date: str | None
+    value: float
+    raw_value: str
+    flag: str | None       # the printed flag as stored, never computed
+
+
+@dataclass
+class TestSeries:
+    name: str
+    key: str
+    unit: str | None
+    reference_range: str | None
+    points: list           # chronological, oldest first
+    count: int
+
+
+def build_trends(records: list) -> list:
+    """One series per (test, unit) of the numeric values a report printed, over
+    their dates. The reference range and flags are carried exactly as stored,
+    never computed. No fit, slope, average, or judgment: just the points."""
+    groups: dict = {}
+    for r in records:
+        date = r.get("record_date") if isinstance(r.get("record_date"), str) else None
+        for inv in r.get("investigations") or []:
+            key = _test_key(inv.get("name"))
+            value = parse_value(inv.get("value"))
+            if not key or value is None:
+                continue
+            unit = inv.get("unit") if isinstance(inv.get("unit"), str) and inv.get("unit").strip() else None
+            g = groups.setdefault((key, (unit or "").lower()),
+                                  {"name": inv.get("name") or key, "unit": unit, "ref": None, "pts": []})
+            flag = inv.get("flag") if inv.get("flag") in ("high", "low", "normal") else None
+            g["pts"].append((date or "", TrendPoint(date=date, value=value,
+                                                    raw_value=str(inv.get("value")), flag=flag)))
+            ref = inv.get("reference_range")
+            if g["ref"] is None and isinstance(ref, str) and ref.strip():
+                g["ref"] = ref.strip()
+
+    out = []
+    for (key, _u), g in groups.items():
+        pts = [p for _, p in sorted(g["pts"], key=lambda t: t[0])]
+        out.append(TestSeries(name=g["name"], key=key, unit=g["unit"],
+                              reference_range=g["ref"], points=pts, count=len(pts)))
+
+    def _last(series):
+        ds = [p.date for p in series.points if p.date]
+        return max(ds) if ds else ""
+    out.sort(key=lambda s: (_last(s), s.name), reverse=True)
+    return out

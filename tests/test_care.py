@@ -84,3 +84,61 @@ def test_ics_event_shape():
 def test_ics_event_none_without_any_date():
     fu = care.FollowUp(record_id="x", record_date=None, text="Review", due_date=None)
     assert care.ics_event(fu) is None
+
+
+# --- lab trends -------------------------------------------------------------
+
+def inv(name, value, unit=None, ref=None, flag="unknown"):
+    return {"name": name, "value": value, "unit": unit, "reference_range": ref, "flag": flag}
+
+
+def labrec(rid, date, invs):
+    return {"record_id": rid, "record_date": date, "document_type": "lab_report",
+            "medications": [], "investigations": invs}
+
+
+def test_parse_value_edge_cases():
+    assert care.parse_value("7.2") == 7.2
+    assert care.parse_value("142") == 142.0
+    assert care.parse_value("7.2 %") == 7.2
+    assert care.parse_value("1,240") == 1240.0
+    assert care.parse_value(">200") is None       # an inequality is not a point value
+    assert care.parse_value("Positive") is None
+    assert care.parse_value("") is None
+    assert care.parse_value(None) is None
+
+
+def test_build_trends_groups_by_test_over_time():
+    recs = [
+        labrec("r1", "2025-01-01", [inv("HbA1c", "7.8", "%", "< 5.7", "high")]),
+        labrec("r2", "2025-07-01", [inv("HbA1c", "6.9", "%", "< 5.7", "high")]),
+    ]
+    series = care.build_trends(recs)
+    assert len(series) == 1
+    s = series[0]
+    assert s.key == "hba1c" and s.unit == "%" and s.count == 2
+    assert [p.value for p in s.points] == [7.8, 6.9]    # chronological, oldest first
+    assert s.points[0].flag == "high" and s.reference_range == "< 5.7"
+
+
+def test_build_trends_separates_different_units_and_skips_non_numeric():
+    recs = [
+        labrec("r1", "2025-01-01", [inv("Anti-TPO", ">200", "IU/mL")]),   # non-numeric: skipped
+        labrec("r2", "2025-02-01", [inv("Glucose", "90", "mg/dL")]),
+        labrec("r3", "2025-03-01", [inv("Glucose", "5.0", "mmol/L")]),    # different unit: own series
+    ]
+    series = care.build_trends(recs)
+    keys = sorted((s.key, s.unit) for s in series)
+    assert keys == [("glucose", "mg/dL"), ("glucose", "mmol/L")]
+
+
+def test_build_trends_empty_and_single():
+    assert care.build_trends([]) == []
+    one = care.build_trends([labrec("r1", "2025-01-01", [inv("TSH", "8.9", "uIU/mL")])])
+    assert len(one) == 1 and one[0].count == 1
+
+
+def test_trends_flag_only_from_printed_values():
+    # an unknown/absent printed flag stays None; it is never computed
+    recs = [labrec("r1", "2025-01-01", [inv("Cholesterol", "185", "mg/dL", "< 200", "unknown")])]
+    assert care.build_trends(recs)[0].points[0].flag is None

@@ -54,7 +54,7 @@ _SECRET_KEYS = (
 # Navigation: internal key -> sidebar label. Keys stay stable for routing/tests.
 NAV = [("Timeline", "🗓  Timeline"), ("Upload", "➕  Add a document"),
        ("Search", "🔍  Search"), ("Medicines", "💊  Medicines"),
-       ("Export", "📤  Doctor summary")]
+       ("Trends", "📈  Trends"), ("Export", "📤  Doctor summary")]
 
 _DOC_ICONS = {"prescription": "💊", "lab_report": "🧪", "discharge_summary": "🏥", "other": "📄"}
 
@@ -730,6 +730,46 @@ def page_medicines(store: Store, c: dict) -> None:
                     _open(o.record_id)
 
 
+# --- trends (lab values over time) ------------------------------------------
+
+def page_trends(store: Store, c: dict) -> None:
+    st.subheader("📈  Trends")
+    st.caption(
+        "Your recorded lab values over time. Values, reference ranges, and flags "
+        "are shown exactly as printed on your reports; nothing here is interpreted, "
+        "and the original reports are the source of truth."
+    )
+    series = care.build_trends(all_records(store, c))
+    if not series:
+        st.info("No numeric lab values found on your records yet.")
+        return
+
+    import pandas as pd
+
+    for s in series:
+        with st.container(border=True):
+            unit = f" ({s.unit})" if s.unit else ""
+            meta = f"{s.count} reading{'s' if s.count != 1 else ''}"
+            if s.reference_range:
+                meta += f" · reference {s.reference_range}"
+            st.markdown(
+                f'🧪 <span class="mrt-head">{_esc(s.name)}{_esc(unit)}</span> '
+                f'&nbsp;<span class="mrt-sub">{_esc(meta)}</span>',
+                unsafe_allow_html=True,
+            )
+            dated = [p for p in s.points if p.date]
+            if len(dated) >= 2:
+                df = pd.DataFrame({s.name: [p.value for p in dated]},
+                                  index=pd.to_datetime([p.date for p in dated]))
+                st.line_chart(df)
+            elif s.count == 1:
+                st.caption("A single reading: nothing to plot yet.")
+            rows = [{"Date": p.date or "undated", "Value": p.raw_value, "Unit": s.unit or "",
+                     "Reference": s.reference_range or "", "Printed flag": (p.flag or "").upper()}
+                    for p in s.points]
+            st.dataframe(rows, hide_index=True, use_container_width=True)
+
+
 # --- doctor summary (export) ------------------------------------------------
 
 def page_export(store: Store, c: dict) -> None:
@@ -1277,6 +1317,8 @@ def main() -> None:
         page_search(store, c)
     elif page == "Medicines":
         page_medicines(store, c)
+    elif page == "Trends":
+        page_trends(store, c)
     elif page == "Export":
         page_export(store, c)
     elif page == "Ask" and c["mode"] == "real":
