@@ -38,8 +38,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st  # noqa: E402
 
-from src import (accounts, auth, backup, chat, crypto, export, guard, ingest,  # noqa: E402
-                 search, timeline, validate)
+from src import (accounts, auth, backup, care, chat, crypto, export, guard,  # noqa: E402
+                 ingest, search, timeline, validate)
 from src.storage import LocalBackend, PrefixedBackend, R2Backend  # noqa: E402
 from src.store import Store  # noqa: E402
 
@@ -465,6 +465,36 @@ _TYPE_FILTER = {
 }
 
 
+def _followups_panel(records: list) -> None:
+    """A compact 'Follow-ups' panel, shown only when any record carries one. Each
+    item is the clinician's verbatim text with an approximate due date; overdue
+    ones are marked. Nothing here is advice, it surfaces what was written."""
+    followups = care.parse_followups(records)
+    if not followups:
+        return
+    with st.container(border=True):
+        st.markdown("**🗓 Follow-ups** &nbsp;<span class=\"mrt-sub\">from your records; dates are approximate</span>",
+                    unsafe_allow_html=True)
+        for i, f in enumerate(followups):
+            left, mid, right = st.columns([5, 2, 1])
+            due = ""
+            if f.due_date:
+                tag = "mrt-review" if f.overdue else "mrt-ok"
+                word = "overdue" if f.overdue else "due"
+                due = f' &nbsp;<span class="mrt-pill {tag}">{word} ~{_esc(f.due_date)}</span>'
+            left.markdown(
+                f'<span class="mrt-head">{_esc(f.text)}</span>{due}<br>'
+                f'<span class="mrt-sub">from {_esc(f.record_date or "an undated record")}</span>',
+                unsafe_allow_html=True,
+            )
+            ics = care.ics_event(f)
+            if ics:
+                mid.download_button("📅 Calendar", ics, file_name=f"followup_{f.due_date or f.record_date or i}.ics",
+                                    mime="text/calendar", key=f"ics_{i}")
+            if f.record_id and right.button("Open", key=f"fu_{i}_{f.record_id}"):
+                _open(f.record_id)
+
+
 def page_timeline(store: Store, c: dict) -> None:
     st.subheader("🗓  Your timeline")
     records = all_records(store, c)
@@ -480,6 +510,8 @@ def page_timeline(store: Store, c: dict) -> None:
     m3.metric("Needs review", ov["needs_review"])
     span = f'Spanning {ov["date_from"]} to {ov["date_to"]}. ' if ov["date_from"] else ""
     st.caption(span + "Grouped into episodes of care, newest first. Open one to see the original beside the reading.")
+
+    _followups_panel(records)
 
     f1, f2 = st.columns([2, 1])
     type_choice = f1.selectbox("Show", list(_TYPE_FILTER), key="tl_type")
